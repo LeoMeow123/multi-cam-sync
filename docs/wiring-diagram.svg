@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="700" viewBox="0 0 900 700" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font: bold 24px sans-serif; fill: #333; }
+      .subtitle { font: 14px sans-serif; fill: #666; }
+      .component-label { font: bold 12px sans-serif; fill: #333; }
+      .pin-label { font: 10px monospace; fill: #333; }
+      .wire-label { font: 9px sans-serif; fill: #666; }
+      .note { font: italic 10px sans-serif; fill: #888; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="700" fill="#f8f9fa"/>
+
+  <!-- Title -->
+  <text x="450" y="35" text-anchor="middle" class="title">Camera Sync System - Wiring Diagram</text>
+  <text x="450" y="55" text-anchor="middle" class="subtitle">4-Camera Hardware Trigger Setup with Arduino UNO</text>
+
+  <!-- Arduino UNO -->
+  <g transform="translate(50, 100)">
+    <rect x="0" y="0" width="180" height="280" rx="8" fill="#0066cc" stroke="#004499" stroke-width="2"/>
+    <text x="90" y="25" text-anchor="middle" fill="white" class="component-label">ARDUINO UNO R3</text>
+
+    <!-- USB port -->
+    <rect x="70" y="260" width="40" height="25" rx="2" fill="#333"/>
+    <text x="90" y="295" text-anchor="middle" class="pin-label">USB</text>
+
+    <!-- Digital pins -->
+    <g transform="translate(150, 40)">
+      <text x="35" y="0" class="pin-label">Digital Pins</text>
+      <!-- Pin 2 -->
+      <circle cx="0" cy="20" r="6" fill="#ff6600"/>
+      <text x="15" y="24" class="pin-label">D2 → Cam1 Trig</text>
+      <!-- Pin 3 -->
+      <circle cx="0" cy="45" r="6" fill="#ff6600"/>
+      <text x="15" y="49" class="pin-label">D3 → Cam2 Trig</text>
+      <!-- Pin 4 -->
+      <circle cx="0" cy="70" r="6" fill="#ff9900"/>
+      <text x="15" y="74" class="pin-label">D4 → Cam3 Trig</text>
+      <!-- Pin 5 -->
+      <circle cx="0" cy="95" r="6" fill="#ff9900"/>
+      <text x="15" y="99" class="pin-label">D5 → Cam4 Trig</text>
+      <!-- Pin 6 -->
+      <circle cx="0" cy="130" r="6" fill="#00cc00"/>
+      <text x="15" y="134" class="pin-label">D6 ← Start Btn</text>
+      <!-- Pin 7 -->
+      <circle cx="0" cy="155" r="6" fill="#cc0000"/>
+      <text x="15" y="159" class="pin-label">D7 ← Kill Switch</text>
+      <!-- Pin 13 -->
+      <circle cx="0" cy="190" r="6" fill="#ffcc00"/>
+      <text x="15" y="194" class="pin-label">D13 = Status LED</text>
+    </g>
+
+    <!-- GND pins -->
+    <g transform="translate(10, 200)">
+      <circle cx="0" cy="0" r="6" fill="#333"/>
+      <text x="15" y="4" class="pin-label">GND (multiple)</text>
+    </g>
+  </g>
+
+  <!-- Breadboard -->
+  <g transform="translate(50, 420)">
+    <rect x="0" y="0" width="200" height="120" rx="4" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+    <text x="100" y="20" text-anchor="middle" class="component-label">BREADBOARD</text>
+
+    <!-- Power rails -->
+    <rect x="10" y="30" width="180" height="15" fill="#cc0000" opacity="0.3"/>
+    <text x="100" y="42" text-anchor="middle" class="pin-label">+ Power Rail (12V)</text>
+    <rect x="10" y="50" width="180" height="15" fill="#333" opacity="0.3"/>
+    <text x="100" y="62" text-anchor="middle" class="pin-label">- Ground Rail</text>
+
+    <!-- Buttons -->
+    <rect x="20" y="75" width="60" height="30" rx="4" fill="#00cc00" stroke="#009900"/>
+    <text x="50" y="95" text-anchor="middle" fill="white" class="pin-label">START</text>
+
+    <rect x="120" y="75" width="60" height="30" rx="4" fill="#cc0000" stroke="#990000"/>
+    <text x="150" y="95" text-anchor="middle" fill="white" class="pin-label">KILL</text>
+  </g>
+
+  <!-- 12V Power Supply -->
+  <g transform="translate(50, 570)">
+    <rect x="0" y="0" width="140" height="60" rx="4" fill="#333" stroke="#222" stroke-width="2"/>
+    <text x="70" y="25" text-anchor="middle" fill="white" class="component-label">12V 5A PSU</text>
+    <circle cx="110" cy="45" r="8" fill="#ff0000"/>
+    <text x="110" y="48" text-anchor="middle" fill="white" style="font-size:8px">+</text>
+    <circle cx="130" cy="45" r="8" fill="#333" stroke="white"/>
+    <text x="130" y="48" text-anchor="middle" fill="white" style="font-size:8px">-</text>
+  </g>
+
+  <!-- Cameras -->
+  <g transform="translate(450, 100)">
+    <!-- Camera 1 -->
+    <g transform="translate(0, 0)">
+      <rect x="0" y="0" width="180" height="100" rx="4" fill="#2d3748" stroke="#1a202c" stroke-width="2"/>
+      <text x="90" y="20" text-anchor="middle" fill="white" class="component-label">CAMERA 1</text>
+      <text x="90" y="35" text-anchor="middle" fill="#aaa" style="font-size:9px">Basler ace2 a2A1920</text>
+
+      <!-- GPIO connector -->
+      <rect x="10" y="50" width="80" height="40" rx="2" fill="#4a5568"/>
+      <text x="50" y="65" text-anchor="middle" fill="white" class="pin-label">M8 GPIO</text>
+      <text x="50" y="80" text-anchor="middle" fill="#aaa" style="font-size:8px">6-pin</text>
+
+      <!-- Ethernet -->
+      <rect x="100" y="50" width="70" height="40" rx="2" fill="#4299e1"/>
+      <text x="135" y="75" text-anchor="middle" fill="white" class="pin-label">5GigE</text>
+    </g>
+
+    <!-- Camera 2 -->
+    <g transform="translate(200, 0)">
+      <rect x="0" y="0" width="180" height="100" rx="4" fill="#2d3748" stroke="#1a202c" stroke-width="2"/>
+      <text x="90" y="20" text-anchor="middle" fill="white" class="component-label">CAMERA 2</text>
+      <text x="90" y="35" text-anchor="middle" fill="#aaa" style="font-size:9px">Basler ace2 a2A1920</text>
+      <rect x="10" y="50" width="80" height="40" rx="2" fill="#4a5568"/>
+      <text x="50" y="65" text-anchor="middle" fill="white" class="pin-label">M8 GPIO</text>
+      <rect x="100" y="50" width="70" height="40" rx="2" fill="#4299e1"/>
+      <text x="135" y="75" text-anchor="middle" fill="white" class="pin-label">5GigE</text>
+    </g>
+
+    <!-- Camera 3 -->
+    <g transform="translate(0, 130)">
+      <rect x="0" y="0" width="180" height="100" rx="4" fill="#2d3748" stroke="#1a202c" stroke-width="2" stroke-dasharray="5,5"/>
+      <text x="90" y="20" text-anchor="middle" fill="#888" class="component-label">CAMERA 3</text>
+      <text x="90" y="35" text-anchor="middle" fill="#666" style="font-size:9px">(Future expansion)</text>
+      <rect x="10" y="50" width="80" height="40" rx="2" fill="#4a5568" opacity="0.5"/>
+      <rect x="100" y="50" width="70" height="40" rx="2" fill="#4299e1" opacity="0.5"/>
+    </g>
+
+    <!-- Camera 4 -->
+    <g transform="translate(200, 130)">
+      <rect x="0" y="0" width="180" height="100" rx="4" fill="#2d3748" stroke="#1a202c" stroke-width="2" stroke-dasharray="5,5"/>
+      <text x="90" y="20" text-anchor="middle" fill="#888" class="component-label">CAMERA 4</text>
+      <text x="90" y="35" text-anchor="middle" fill="#666" style="font-size:9px">(Future expansion)</text>
+      <rect x="10" y="50" width="80" height="40" rx="2" fill="#4a5568" opacity="0.5"/>
+      <rect x="100" y="50" width="70" height="40" rx="2" fill="#4299e1" opacity="0.5"/>
+    </g>
+  </g>
+
+  <!-- 10GigE Switch -->
+  <g transform="translate(500, 380)">
+    <rect x="0" y="0" width="300" height="80" rx="4" fill="#48bb78" stroke="#38a169" stroke-width="2"/>
+    <text x="150" y="25" text-anchor="middle" fill="white" class="component-label">10GigE NETWORK SWITCH</text>
+
+    <!-- Ports -->
+    <g transform="translate(20, 40)">
+      <rect x="0" y="0" width="40" height="25" rx="2" fill="#276749"/>
+      <text x="20" y="17" text-anchor="middle" fill="white" style="font-size:8px">Cam1</text>
+      <rect x="50" y="0" width="40" height="25" rx="2" fill="#276749"/>
+      <text x="70" y="17" text-anchor="middle" fill="white" style="font-size:8px">Cam2</text>
+      <rect x="100" y="0" width="40" height="25" rx="2" fill="#276749" opacity="0.5"/>
+      <text x="120" y="17" text-anchor="middle" fill="white" style="font-size:8px">Cam3</text>
+      <rect x="150" y="0" width="40" height="25" rx="2" fill="#276749" opacity="0.5"/>
+      <text x="170" y="17" text-anchor="middle" fill="white" style="font-size:8px">Cam4</text>
+      <rect x="210" y="0" width="60" height="25" rx="2" fill="#2c5282"/>
+      <text x="240" y="17" text-anchor="middle" fill="white" style="font-size:8px">→ PC</text>
+    </g>
+  </g>
+
+  <!-- Mini PC -->
+  <g transform="translate(500, 500)">
+    <rect x="0" y="0" width="250" height="100" rx="4" fill="#4a5568" stroke="#2d3748" stroke-width="2"/>
+    <text x="125" y="25" text-anchor="middle" fill="white" class="component-label">MINI PC (BOSGAME P4 Plus)</text>
+
+    <!-- Ports -->
+    <g transform="translate(20, 40)">
+      <rect x="0" y="0" width="50" height="25" rx="2" fill="#2d3748"/>
+      <text x="25" y="17" text-anchor="middle" fill="white" style="font-size:8px">2.5GbE</text>
+      <rect x="60" y="0" width="50" height="25" rx="2" fill="#2d3748"/>
+      <text x="85" y="17" text-anchor="middle" fill="white" style="font-size:8px">2.5GbE</text>
+      <rect x="120" y="0" width="50" height="25" rx="2" fill="#805ad5"/>
+      <text x="145" y="17" text-anchor="middle" fill="white" style="font-size:8px">USB-C</text>
+      <rect x="180" y="0" width="40" height="25" rx="2" fill="#333"/>
+      <text x="200" y="17" text-anchor="middle" fill="white" style="font-size:8px">USB</text>
+    </g>
+
+    <text x="220" y="95" text-anchor="end" fill="#aaa" style="font-size:9px">Arduino USB →</text>
+  </g>
+
+  <!-- Wiring lines -->
+  <g stroke-width="2" fill="none">
+    <!-- Arduino to Cameras (trigger) -->
+    <path d="M 230 160 L 350 160 L 350 150 L 450 150" stroke="#ff6600"/>
+    <path d="M 230 185 L 370 185 L 370 150 L 650 150" stroke="#ff6600"/>
+
+    <!-- Arduino to Breadboard -->
+    <path d="M 200 290 L 230 290 L 230 480 L 250 480" stroke="#00cc00"/>
+    <path d="M 200 315 L 240 315 L 240 495 L 250 495" stroke="#cc0000"/>
+
+    <!-- Power supply to Breadboard -->
+    <path d="M 160 570 L 160 550 L 100 550 L 100 530" stroke="#cc0000"/>
+    <path d="M 180 570 L 180 540 L 130 540 L 130 530" stroke="#333"/>
+
+    <!-- Breadboard to Cameras (power) -->
+    <path d="M 250 450 L 380 450 L 380 180 L 460 180" stroke="#cc0000" stroke-dasharray="4,2"/>
+    <path d="M 250 460 L 390 460 L 390 180 L 660 180" stroke="#cc0000" stroke-dasharray="4,2"/>
+
+    <!-- Cameras to Switch (Ethernet) -->
+    <path d="M 620 150 L 620 380" stroke="#4299e1" stroke-width="3"/>
+    <path d="M 820 150 L 820 350 L 720 350 L 720 380" stroke="#4299e1" stroke-width="3"/>
+
+    <!-- Switch to PC -->
+    <path d="M 760 460 L 760 520 L 750 520" stroke="#4299e1" stroke-width="3"/>
+
+    <!-- Arduino USB to PC -->
+    <path d="M 140 395 L 140 560 L 480 560 L 480 540 L 700 540" stroke="#333" stroke-width="2"/>
+  </g>
+
+  <!-- GPIO Cable Pinout Reference -->
+  <g transform="translate(270, 250)">
+    <rect x="0" y="0" width="160" height="130" rx="4" fill="white" stroke="#ccc"/>
+    <text x="80" y="20" text-anchor="middle" class="component-label">GPIO Cable Pinout</text>
+    <text x="10" y="40" class="pin-label">Pin 1 (White): Trigger</text>
+    <text x="10" y="55" class="pin-label">Pin 2 (Brown): I/O 2</text>
+    <text x="10" y="70" class="pin-label">Pin 3 (Green): I/O 3</text>
+    <text x="10" y="85" class="pin-label">Pin 4 (Yellow): GND</text>
+    <text x="10" y="100" class="pin-label">Pin 5 (Grey): 12V+</text>
+    <text x="10" y="115" class="pin-label">Pin 6 (Pink): 12V GND</text>
+  </g>
+
+  <!-- Legend -->
+  <g transform="translate(700, 620)">
+    <text x="0" y="0" class="component-label">Legend:</text>
+    <line x1="0" y1="15" x2="30" y2="15" stroke="#ff6600" stroke-width="2"/>
+    <text x="35" y="18" class="wire-label">Trigger signal</text>
+    <line x1="0" y1="30" x2="30" y2="30" stroke="#cc0000" stroke-width="2"/>
+    <text x="35" y="33" class="wire-label">12V power</text>
+    <line x1="0" y1="45" x2="30" y2="45" stroke="#4299e1" stroke-width="3"/>
+    <text x="35" y="48" class="wire-label">Ethernet</text>
+    <line x1="0" y1="60" x2="30" y2="60" stroke="#333" stroke-width="2"/>
+    <text x="35" y="63" class="wire-label">USB/GND</text>
+  </g>
+</svg>
