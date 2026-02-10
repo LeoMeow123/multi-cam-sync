@@ -11,7 +11,12 @@ export const mainConfig: Configuration = {
   resolve: {
     extensions: ['.js', '.ts', '.jsx', '.tsx', '.css', '.json'],
   },
+  node: {
+    __dirname: true,
+    __filename: true,
+  },
   externals: {
     serialport: 'commonjs serialport',
+    '@serialport/bindings-cpp': 'commonjs @serialport/bindings-cpp',
   },
 };

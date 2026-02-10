@@ -2,11 +2,12 @@
  * Main App Component
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import CameraGrid from './components/CameraGrid';
 import RecordingControls from './components/RecordingControls';
 import StatusDashboard from './components/StatusDashboard';
 import SettingsPanel from './components/SettingsPanel';
+import HomePage from './components/HomePage';
 import type { CameraConfig } from '../types/camera';
 import type { ArduinoStatus } from '../types/arduino';
 import type { RecordingStatus, RecordingConfig } from '../types/recording';
@@ -23,11 +24,11 @@ declare global {
   }
 }
 
-type Tab = 'cameras' | 'settings';
+type Tab = 'home' | 'cameras' | 'settings';
 
 const App: React.FC = () => {
   // State
-  const [activeTab, setActiveTab] = useState<Tab>('cameras');
+  const [activeTab, setActiveTab] = useState<Tab>('home');
   const [cameras, setCameras] = useState<CameraConfig[]>([]);
   const [cameraStatus, setCameraStatus] = useState<Record<string, any>>({});
   const [previews, setPreviews] = useState<Record<string, string>>({});
@@ -57,6 +58,26 @@ const App: React.FC = () => {
     loadConfig();
     setupEventListeners();
   }, []);
+
+  // Auto-poll hardware status when on the home tab
+  useEffect(() => {
+    if (activeTab !== 'home') return;
+
+    const poll = async () => {
+      try {
+        const status = await window.electron.arduino.getStatus();
+        setArduinoStatus(status);
+      } catch { /* ignore */ }
+      try {
+        const statuses = await window.electron.camera.getStatus();
+        setCameraStatus(statuses);
+      } catch { /* ignore */ }
+    };
+
+    poll(); // initial poll
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  }, [activeTab]);
 
   const loadConfig = async () => {
     try {
@@ -184,6 +205,14 @@ const App: React.FC = () => {
     setRecordingConfig(config.recording);
   };
 
+  const handleDetectCameras = async () => {
+    try {
+      await window.electron.camera.detectCameras();
+    } catch (error) {
+      console.error('Failed to detect cameras:', error);
+    }
+  };
+
   const handleSelectOutputDir = async () => {
     const dir = await window.electron.config.selectOutputDir();
     if (dir) {
@@ -200,6 +229,16 @@ const App: React.FC = () => {
           <div className="flex items-center gap-4">
             {/* Tab navigation */}
             <nav className="flex gap-2">
+              <button
+                onClick={() => setActiveTab('home')}
+                className={`px-4 py-2 rounded-lg transition ${
+                  activeTab === 'home'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                Home
+              </button>
               <button
                 onClick={() => setActiveTab('cameras')}
                 className={`px-4 py-2 rounded-lg transition ${
@@ -245,7 +284,18 @@ const App: React.FC = () => {
 
       {/* Main content */}
       <main className="p-6">
-        {activeTab === 'cameras' ? (
+        {activeTab === 'home' ? (
+          <HomePage
+            arduinoStatus={arduinoStatus}
+            cameras={cameras}
+            cameraStatus={cameraStatus}
+            recordingConfig={recordingConfig}
+            isConnecting={isConnecting}
+            onConnect={handleConnect}
+            onDetectCameras={handleDetectCameras}
+            onNavigate={(tab) => setActiveTab(tab as Tab)}
+          />
+        ) : activeTab === 'cameras' ? (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Camera grid - spans 3 columns */}
             <div className="lg:col-span-3">

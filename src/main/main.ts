@@ -52,6 +52,7 @@ function createWindow(): void {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
     title: 'Camera Sync System',
   });

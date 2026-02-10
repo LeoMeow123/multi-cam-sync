@@ -76,9 +76,9 @@ export class ArduinoManager extends EventEmitter {
   async connect(portPath?: string): Promise<boolean> {
     try {
       // Determine port
-      let path = portPath;
+      let path: string | undefined = portPath;
       if (!path || this.config.port === 'auto') {
-        path = await ArduinoManager.detectArduino();
+        path = (await ArduinoManager.detectArduino()) ?? undefined;
         if (!path) {
           this.emit('error', 'No Arduino detected');
           return false;
