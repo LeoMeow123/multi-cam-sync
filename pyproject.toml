@@ -9,6 +9,7 @@ dependencies = [
     "pillow>=10.0.0",
     "pypylon>=3.0.0",
     "pyserial>=3.5",
+    "opencv-python>=4.8.0",
 ]
 
 [project.optional-dependencies]

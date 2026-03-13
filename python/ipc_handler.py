@@ -183,11 +183,13 @@ class IPCHandler:
             send_error("output_dir is required")
             return
 
+        fps = cmd.get("fps", 120)
+
         # Frame callback to notify main process
         def on_frame(frame_info: FrameInfo) -> None:
             send_frame_saved(frame_info)
 
-        success = self.camera.start_capture(output_dir, frame_callback=on_frame)
+        success = self.camera.start_capture(output_dir, frame_callback=on_frame, fps=fps)
         send_data({"success": success, "capturing": success})
 
     def _handle_stop_capture(self) -> None:

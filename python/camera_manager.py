@@ -20,6 +20,7 @@ from typing import Optional, List, Dict, Any, Callable
 
 import numpy as np
 from PIL import Image
+import cv2
 
 from camera_types import (
     CameraSettings,
@@ -67,6 +68,9 @@ class CameraManager:
         self._capture_active = threading.Event()
         self._output_dir: Optional[Path] = None
         self._frame_callback: Optional[Callable[[FrameInfo], None]] = None
+        self._video_writer: Optional[cv2.VideoWriter] = None
+        self._video_path: Optional[Path] = None
+        self._capture_start_time: Optional[float] = None
 
     @staticmethod
     def detect_cameras() -> List[CameraInfo]:
@@ -176,6 +180,9 @@ class CameraManager:
             return
 
         try:
+            # Configure ROI first (must be done before other settings)
+            self._configure_roi()
+
             # Exposure time
             self.camera.ExposureTimeAbs.Value = self.settings.exposure_time
 
@@ -193,8 +200,55 @@ class CameraManager:
         except Exception as e:
             print(f"WARNING:Some settings not supported: {e}", flush=True)
 
+    def _configure_roi(self) -> None:
+        """Configure camera Region of Interest (ROI) for reduced bandwidth."""
+        if not self.camera:
+            return
+
+        try:
+            # Get sensor max dimensions
+            max_width = self.camera.WidthMax.Value
+            max_height = self.camera.HeightMax.Value
+
+            # Determine target ROI size
+            roi_width = self.settings.roi_width or max_width
+            roi_height = self.settings.roi_height or max_height
+
+            # Clamp to max dimensions
+            roi_width = min(roi_width, max_width)
+            roi_height = min(roi_height, max_height)
+
+            # Calculate offsets (center if not specified)
+            if self.settings.roi_offset_x is not None:
+                offset_x = self.settings.roi_offset_x
+            else:
+                offset_x = (max_width - roi_width) // 2
+
+            if self.settings.roi_offset_y is not None:
+                offset_y = self.settings.roi_offset_y
+            else:
+                offset_y = (max_height - roi_height) // 2
+
+            # Apply ROI settings (order matters!)
+            # First reset to max to avoid constraint violations
+            self.camera.OffsetX.Value = 0
+            self.camera.OffsetY.Value = 0
+            self.camera.Width.Value = max_width
+            self.camera.Height.Value = max_height
+
+            # Now set the actual ROI
+            self.camera.Width.Value = roi_width
+            self.camera.Height.Value = roi_height
+            self.camera.OffsetX.Value = offset_x
+            self.camera.OffsetY.Value = offset_y
+
+            print(f"STATUS:Camera {self.camera_id} ROI set to {roi_width}x{roi_height} at ({offset_x},{offset_y})", flush=True)
+
+        except Exception as e:
+            print(f"WARNING:Failed to set ROI: {e}", flush=True)
+
     def configure_hardware_trigger(self) -> None:
-        """Configure camera for hardware trigger mode."""
+        """Configure camera for hardware trigger mode (FrameStart)."""
         if not self.camera or not self.is_open:
             print("ERROR:Camera not connected", flush=True)
             return
@@ -297,6 +351,7 @@ class CameraManager:
         self,
         output_dir: str,
         frame_callback: Optional[Callable[[FrameInfo], None]] = None,
+        fps: int = 120,
     ) -> bool:
         """
         Start hardware-triggered capture session.
@@ -304,6 +359,7 @@ class CameraManager:
         Args:
             output_dir: Directory to save captured frames
             frame_callback: Optional callback for each captured frame
+            fps: Frame rate for video file (default 120)
 
         Returns:
             True if capture started successfully
@@ -322,9 +378,30 @@ class CameraManager:
 
         self._frame_callback = frame_callback
         self.frame_count = 0
+        self._capture_start_time = time.time()
 
         # Configure for hardware trigger
         self.configure_hardware_trigger()
+
+        # Get camera resolution for video writer
+        width = self.camera.Width.Value
+        height = self.camera.Height.Value
+
+        # Create video file path (AVI with MJPG codec for fast encoding)
+        self._video_path = self._output_dir / f"{self.camera_id}.avi"
+
+        # Initialize video writer
+        # Use MJPG codec - faster encoding than mp4v, good for high fps
+        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+        self._video_writer = cv2.VideoWriter(
+            str(self._video_path), fourcc, fps, (width, height), isColor=False
+        )
+
+        if not self._video_writer.isOpened():
+            print(f"ERROR:Failed to create video writer for {self._video_path}", flush=True)
+            return False
+
+        print(f"STATUS:Video recording to {self._video_path} ({width}x{height} @ {fps}fps)", flush=True)
 
         # Start grabbing
         self.camera.StartGrabbing(pylon.GrabStrategy_OneByOne)
@@ -354,17 +431,19 @@ class CameraManager:
                     self.frame_count += 1
                     timestamp = time.time()
 
-                    # Save frame
-                    img = Image.fromarray(grab_result.Array)
-                    file_path = self._output_dir / f"{self.frame_count:06d}.png"
-                    img.save(file_path, compress_level=1)
+                    # Get frame as numpy array
+                    frame = grab_result.Array
+
+                    # Write frame to video
+                    if self._video_writer and self._video_writer.isOpened():
+                        self._video_writer.write(frame)
 
                     # Notify callback
                     if self._frame_callback:
                         frame_info = FrameInfo(
                             camera_id=self.camera_id,
                             frame_number=self.frame_count,
-                            file_path=str(file_path),
+                            file_path=str(self._video_path) if self._video_path else "",
                             timestamp=timestamp,
                             width=grab_result.Width,
                             height=grab_result.Height,
@@ -407,17 +486,33 @@ class CameraManager:
         if self.camera and self.camera.IsGrabbing():
             self.camera.StopGrabbing()
 
+        # Calculate duration and FPS
+        duration = 0.0
+        actual_fps = 0.0
+        if self._capture_start_time:
+            duration = time.time() - self._capture_start_time
+            if duration > 0:
+                actual_fps = self.frame_count / duration
+
+        # Close video writer
+        if self._video_writer:
+            self._video_writer.release()
+            self._video_writer = None
+            print(f"STATUS:Video saved to {self._video_path}", flush=True)
+
         self.is_capturing = False
 
         result = CaptureResult(
             camera_id=self.camera_id,
             success=True,
             frame_count=self.frame_count,
-            output_dir=str(self._output_dir) if self._output_dir else "",
+            output_dir=str(self._video_path) if self._video_path else str(self._output_dir) if self._output_dir else "",
+            duration_seconds=duration,
         )
 
         print(
-            f"STATUS:Camera {self.camera_id} capture stopped, frames: {self.frame_count}",
+            f"STATUS:Camera {self.camera_id} capture stopped, frames: {self.frame_count}, "
+            f"duration: {duration:.2f}s, fps: {actual_fps:.1f}",
             flush=True,
         )
 

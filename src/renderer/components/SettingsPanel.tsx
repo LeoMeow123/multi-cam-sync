@@ -14,7 +14,7 @@ interface SettingsPanelProps {
   recordingConfig: RecordingConfig;
   arduinoStatus: ArduinoStatus;
   onSave: (config: any) => void;
-  onSelectOutputDir: () => void;
+  onSelectOutputDir: () => Promise<string | null>;
   onDetectCameras: () => Promise<CameraInfo[]>;
 }
 
@@ -64,6 +64,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       cameras,
       recording: recordingConfig,
     });
+  };
+
+  const handleSelectOutputDir = async () => {
+    const dir = await onSelectOutputDir();
+    if (dir) {
+      setRecordingConfig((prev) => ({ ...prev, output_dir: dir }));
+    }
   };
 
   return (
@@ -183,7 +190,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 className="flex-1 px-3 py-2 bg-gray-700 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
               />
               <button
-                onClick={onSelectOutputDir}
+                onClick={handleSelectOutputDir}
                 className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded transition"
               >
                 Browse

@@ -107,10 +107,12 @@ ipcMain.handle('camera:detect', async () => {
 });
 
 ipcMain.handle('camera:connect-all', async () => {
-  if (!cameraManager) {
-    cameraManager = new MultiCameraManager();
-    await cameraManager.initialize(appConfig.cameras);
+  // Always shutdown existing manager and reinitialize with current config
+  if (cameraManager) {
+    cameraManager.shutdown();
   }
+  cameraManager = new MultiCameraManager();
+  await cameraManager.initialize(appConfig.cameras);
   const results = await cameraManager.connectAll();
   return Object.fromEntries(results);
 });
@@ -252,8 +254,8 @@ function setupArduinoEvents(): void {
 // Recording IPC Handlers
 // ============================================================================
 
-ipcMain.handle('recording:start', async () => {
-  return await startRecording();
+ipcMain.handle('recording:start', async (_event, sessionName?: string) => {
+  return await startRecording(sessionName);
 });
 
 ipcMain.handle('recording:stop', async () => {
@@ -273,30 +275,45 @@ ipcMain.handle('recording:get-config', async () => {
   return appConfig.recording;
 });
 
-async function startRecording(): Promise<boolean> {
+async function startRecording(sessionName?: string): Promise<boolean> {
   if (!cameraManager || !arduinoManager) {
     return false;
   }
 
-  // Create session directory
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  // Create session directory with custom name or timestamp fallback
+  const folderName = sessionName || new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const sessionDir = path.join(
     appConfig.recording.output_dir.replace('~', app.getPath('home')),
-    timestamp
+    folderName
   );
 
   try {
     fs.mkdirSync(sessionDir, { recursive: true });
 
-    // Start camera capture
-    await cameraManager.startCapture(sessionDir);
+    // Start camera capture (configures hardware trigger and starts grabbing)
+    const fps = appConfig.recording.frame_rate || 120;
+    await cameraManager.startCapture(sessionDir, fps);
+
+    // Wait for cameras to be ready for triggers
+    console.log('[Recording] Waiting for cameras to initialize...');
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Configure Arduino with correct FPS and camera count
+    // Compensate for Arduino timing overhead (~92% efficiency)
+    const arduinoFps = Math.round(fps / 0.92);
+    const cameraCount = appConfig.cameras.filter(c => c.enabled).length;
+    console.log(`[Recording] Setting Arduino: ${arduinoFps} fps (compensated from ${fps} fps), ${cameraCount} cameras`);
+    arduinoManager.setFPS(arduinoFps);
+    arduinoManager.setCameras(cameraCount);
+    await new Promise(resolve => setTimeout(resolve, 100)); // Wait for config
 
     // Start Arduino triggering
+    console.log('[Recording] Starting Arduino triggers');
     arduinoManager.startRecording();
 
     recordingState = {
       state: 'recording',
-      session_id: timestamp,
+      session_id: folderName,
       elapsed_seconds: 0,
       frame_counts: {},
       errors: [],

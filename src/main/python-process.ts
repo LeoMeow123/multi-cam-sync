@@ -52,6 +52,18 @@ export class PythonProcess extends EventEmitter {
       }
     }
 
+    // Check for local .venv (development)
+    const venvPaths = [
+      path.join(__dirname, '..', '..', '.venv', 'Scripts', 'python.exe'),  // Windows
+      path.join(__dirname, '..', '..', '.venv', 'bin', 'python'),          // Unix
+    ];
+
+    for (const p of venvPaths) {
+      if (fs.existsSync(p)) {
+        return p;
+      }
+    }
+
     // Fall back to system Python
     return process.platform === 'win32' ? 'python' : 'python3';
   }

@@ -110,8 +110,8 @@ const arduinoAPI = {
  * Recording API
  */
 const recordingAPI = {
-  start: (): Promise<boolean> =>
-    ipcRenderer.invoke('recording:start'),
+  start: (sessionName?: string): Promise<boolean> =>
+    ipcRenderer.invoke('recording:start', sessionName),
 
   stop: (): Promise<{ frameCounts: Record<string, number>; synced: boolean }> =>
     ipcRenderer.invoke('recording:stop'),

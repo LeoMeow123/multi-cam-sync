@@ -167,7 +167,7 @@ export class MultiCameraManager extends EventEmitter {
   /**
    * Start capture on all cameras
    */
-  async startCapture(sessionDir: string): Promise<void> {
+  async startCapture(sessionDir: string, fps: number = 120): Promise<void> {
     // Reset frame counts
     this.frameCountS.forEach((_, id) => this.frameCountS.set(id, 0));
 
@@ -178,6 +178,7 @@ export class MultiCameraManager extends EventEmitter {
         await process.sendCommand({
           command: 'start_capture',
           output_dir: outputDir,
+          fps: fps,
         });
         this.emit('capture-started', id);
       } catch (error) {

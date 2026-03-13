@@ -4,10 +4,11 @@
 
 import React, { useState, useEffect } from 'react';
 import CameraGrid from './components/CameraGrid';
-import RecordingControls from './components/RecordingControls';
+import RecordingPanel from './components/RecordingPanel';
 import StatusDashboard from './components/StatusDashboard';
 import SettingsPanel from './components/SettingsPanel';
 import HomePage from './components/HomePage';
+import DeveloperModeDialog from './components/DeveloperModeDialog';
 import type { CameraConfig } from '../types/camera';
 import type { ArduinoStatus } from '../types/arduino';
 import type { RecordingStatus, RecordingConfig } from '../types/recording';
@@ -52,6 +53,79 @@ const App: React.FC = () => {
     max_duration_seconds: 300,
   });
   const [isConnecting, setIsConnecting] = useState(false);
+  const [developerMode, setDeveloperMode] = useState(false);
+  const [showDevModeDialog, setShowDevModeDialog] = useState(false);
+
+  // Developer mode: compute effective statuses
+  const effectiveArduinoStatus: ArduinoStatus = developerMode
+    ? { ...arduinoStatus, connected: true, port: 'DEV_MODE', state: 'idle' }
+    : arduinoStatus;
+
+  const effectiveCameraStatus: Record<string, any> = developerMode
+    ? cameras.reduce((acc, cam) => {
+        if (cam.enabled) {
+          acc[cam.id] = { connected: true, streaming: false };
+        }
+        return acc;
+      }, {} as Record<string, any>)
+    : cameraStatus;
+
+  // Developer mode handlers
+  const handleDevModeToggle = () => {
+    if (developerMode) {
+      // Turning off dev mode
+      setDeveloperMode(false);
+      setRecordingStatus({ state: 'idle', elapsed_seconds: 0, frame_counts: {}, errors: [] });
+    } else {
+      // Show password dialog
+      setShowDevModeDialog(true);
+    }
+  };
+
+  const handleDevModeConfirm = () => {
+    setDeveloperMode(true);
+    setShowDevModeDialog(false);
+  };
+
+  const handleDevModeCancel = () => {
+    setShowDevModeDialog(false);
+  };
+
+  // Developer mode mock recording handlers
+  const handleArmDevMode = () => {
+    setRecordingStatus((prev) => ({ ...prev, state: 'armed' }));
+  };
+
+  const handleDisarmDevMode = () => {
+    setRecordingStatus((prev) => ({ ...prev, state: 'idle' }));
+  };
+
+  const handleStartRecordingDevMode = (sessionName?: string) => {
+    setRecordingStatus((prev) => ({
+      ...prev,
+      state: 'recording',
+      session_id: sessionName || `dev_${Date.now()}`,
+      elapsed_seconds: 0,
+    }));
+    // Simulate elapsed time
+    const interval = setInterval(() => {
+      setRecordingStatus((prev) => {
+        if (prev.state !== 'recording') {
+          clearInterval(interval);
+          return prev;
+        }
+        return { ...prev, elapsed_seconds: prev.elapsed_seconds + 1 };
+      });
+    }, 1000);
+  };
+
+  const handleStopRecordingDevMode = () => {
+    setRecordingStatus((prev) => ({ ...prev, state: 'stopping' }));
+    setTimeout(() => {
+      setRecordingStatus((prev) => ({ ...prev, state: 'idle' }));
+      alert('[Dev Mode] Recording stopped. Files would be saved to output directory.');
+    }, 500);
+  };
 
   // Load initial config
   useEffect(() => {
@@ -153,6 +227,11 @@ const App: React.FC = () => {
   let previewInterval: NodeJS.Timeout | null = null;
 
   const startPreviewRefresh = () => {
+    // Preview disabled temporarily to avoid camera conflicts
+    // TODO: Fix threading issues in Python camera grab
+    console.log('[Preview] Preview refresh disabled for stability');
+    return;
+
     stopPreviewRefresh();
 
     previewInterval = setInterval(async () => {
@@ -184,8 +263,8 @@ const App: React.FC = () => {
     await window.electron.arduino.disarm();
   };
 
-  const handleStartRecording = async () => {
-    await window.electron.recording.start();
+  const handleStartRecording = async (sessionName?: string) => {
+    await window.electron.recording.start(sessionName);
     stopPreviewRefresh();
   };
 
@@ -213,11 +292,12 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSelectOutputDir = async () => {
+  const handleSelectOutputDir = async (): Promise<string | null> => {
     const dir = await window.electron.config.selectOutputDir();
     if (dir) {
       setRecordingConfig((prev) => ({ ...prev, output_dir: dir }));
     }
+    return dir;
   };
 
   return (
@@ -225,7 +305,14 @@ const App: React.FC = () => {
       {/* Header */}
       <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Camera Sync System</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold">Camera Sync System</h1>
+            {developerMode && (
+              <span className="px-2 py-1 text-xs font-semibold bg-yellow-600 text-yellow-100 rounded">
+                DEV MODE
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-4">
             {/* Tab navigation */}
             <nav className="flex gap-2">
@@ -259,10 +346,20 @@ const App: React.FC = () => {
               >
                 Settings
               </button>
+              <button
+                onClick={handleDevModeToggle}
+                className={`px-4 py-2 rounded-lg transition ${
+                  developerMode
+                    ? 'bg-yellow-600 text-white hover:bg-yellow-700'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                Dev Mode
+              </button>
             </nav>
 
-            {/* Connect/Disconnect button */}
-            {arduinoStatus.connected ? (
+            {/* Connect/Disconnect button - hidden in dev mode */}
+            {!developerMode && (effectiveArduinoStatus.connected ? (
               <button
                 onClick={handleDisconnect}
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition"
@@ -277,24 +374,50 @@ const App: React.FC = () => {
               >
                 {isConnecting ? 'Connecting...' : 'Connect'}
               </button>
-            )}
+            ))}
           </div>
         </div>
       </header>
 
+      {/* Developer Mode Dialog */}
+      {showDevModeDialog && (
+        <DeveloperModeDialog
+          onConfirm={handleDevModeConfirm}
+          onCancel={handleDevModeCancel}
+        />
+      )}
+
       {/* Main content */}
       <main className="p-6">
         {activeTab === 'home' ? (
-          <HomePage
-            arduinoStatus={arduinoStatus}
-            cameras={cameras}
-            cameraStatus={cameraStatus}
-            recordingConfig={recordingConfig}
-            isConnecting={isConnecting}
-            onConnect={handleConnect}
-            onDetectCameras={handleDetectCameras}
-            onNavigate={(tab) => setActiveTab(tab as Tab)}
-          />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2">
+              <HomePage
+                arduinoStatus={effectiveArduinoStatus}
+                cameras={cameras}
+                cameraStatus={effectiveCameraStatus}
+                recordingConfig={recordingConfig}
+                isConnecting={isConnecting}
+                onConnect={developerMode ? () => {} : handleConnect}
+                onDetectCameras={developerMode ? () => {} : handleDetectCameras}
+                onNavigate={(tab) => setActiveTab(tab as Tab)}
+              />
+            </div>
+            <div>
+              <RecordingPanel
+                state={recordingStatus.state}
+                arduinoConnected={effectiveArduinoStatus.connected}
+                camerasConnected={Object.values(effectiveCameraStatus).some((s: any) => s?.connected)}
+                elapsedSeconds={recordingStatus.elapsed_seconds}
+                frameCounts={recordingStatus.frame_counts}
+                outputDir={recordingConfig.output_dir}
+                onArm={developerMode ? handleArmDevMode : handleArm}
+                onDisarm={developerMode ? handleDisarmDevMode : handleDisarm}
+                onStart={developerMode ? handleStartRecordingDevMode : handleStartRecording}
+                onStop={developerMode ? handleStopRecordingDevMode : handleStopRecording}
+              />
+            </div>
+          </div>
         ) : activeTab === 'cameras' ? (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Camera grid - spans 3 columns */}
@@ -302,7 +425,7 @@ const App: React.FC = () => {
               <CameraGrid
                 cameras={cameras.filter((c) => c.enabled)}
                 previews={previews}
-                status={cameraStatus}
+                status={effectiveCameraStatus}
                 frameCounts={recordingStatus.frame_counts}
               />
             </div>
@@ -310,21 +433,22 @@ const App: React.FC = () => {
             {/* Sidebar */}
             <div className="space-y-6">
               <StatusDashboard
-                arduinoStatus={arduinoStatus}
+                arduinoStatus={effectiveArduinoStatus}
                 recordingStatus={recordingStatus}
                 cameraCount={cameras.filter((c) => c.enabled).length}
               />
 
-              <RecordingControls
+              <RecordingPanel
                 state={recordingStatus.state}
-                arduinoConnected={arduinoStatus.connected}
-                camerasConnected={Object.values(cameraStatus).some((s: any) => s?.connected)}
-                frameCount={arduinoStatus.frame_count}
+                arduinoConnected={effectiveArduinoStatus.connected}
+                camerasConnected={Object.values(effectiveCameraStatus).some((s: any) => s?.connected)}
                 elapsedSeconds={recordingStatus.elapsed_seconds}
-                onArm={handleArm}
-                onDisarm={handleDisarm}
-                onStart={handleStartRecording}
-                onStop={handleStopRecording}
+                frameCounts={recordingStatus.frame_counts}
+                outputDir={recordingConfig.output_dir}
+                onArm={developerMode ? handleArmDevMode : handleArm}
+                onDisarm={developerMode ? handleDisarmDevMode : handleDisarm}
+                onStart={developerMode ? handleStartRecordingDevMode : handleStartRecording}
+                onStop={developerMode ? handleStopRecordingDevMode : handleStopRecording}
               />
             </div>
           </div>
@@ -332,10 +456,10 @@ const App: React.FC = () => {
           <SettingsPanel
             cameras={cameras}
             recordingConfig={recordingConfig}
-            arduinoStatus={arduinoStatus}
+            arduinoStatus={effectiveArduinoStatus}
             onSave={handleSaveSettings}
             onSelectOutputDir={handleSelectOutputDir}
-            onDetectCameras={async () => {
+            onDetectCameras={developerMode ? async () => [] : async () => {
               const detected = await window.electron.camera.detectCameras();
               return detected;
             }}

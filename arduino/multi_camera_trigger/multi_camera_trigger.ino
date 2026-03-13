@@ -23,7 +23,7 @@
 
 #define MAX_CAMERAS 4
 #define DEFAULT_FPS 120
-#define TRIGGER_PULSE_US 100  // Trigger pulse width in microseconds
+#define TRIGGER_PULSE_US 50  // Trigger pulse width in microseconds (reduced for higher fps)
 #define DEBOUNCE_MS 50        // Button debounce time
 
 // Pin assignments
@@ -273,29 +273,20 @@ void loop() {
     processCommand(cmd);
   }
 
-  // Handle recording state
+  // Handle recording state - tight timing loop
   if (currentState == STATE_RECORDING) {
     unsigned long now = micros();
 
-    // Handle micros() overflow
-    unsigned long elapsed;
-    if (now >= lastTriggerUs) {
-      elapsed = now - lastTriggerUs;
-    } else {
-      // Overflow occurred
-      elapsed = (0xFFFFFFFF - lastTriggerUs) + now + 1;
-    }
-
-    if (elapsed >= frameIntervalUs) {
+    // Simple elapsed check (overflow handled by unsigned arithmetic)
+    if ((now - lastTriggerUs) >= frameIntervalUs) {
       triggerAllCameras();
-      lastTriggerUs = now;
+      lastTriggerUs += frameIntervalUs;
 
-      // Optional: report frame count periodically (every 100 frames)
-      // Commenting out to reduce serial traffic during recording
-      // if (frameCount % 100 == 0) {
-      //   Serial.print("FRAME:");
-      //   Serial.println(frameCount);
-      // }
+      // Catch up if we're behind (prevents drift accumulation)
+      while ((micros() - lastTriggerUs) >= frameIntervalUs) {
+        triggerAllCameras();
+        lastTriggerUs += frameIntervalUs;
+      }
     }
   }
 

@@ -27,6 +27,12 @@ class CameraSettings:
     gain: int = 0  # raw gain value
     gamma: float = 1.0  # gamma correction
 
+    # ROI settings (None = full resolution)
+    roi_width: Optional[int] = 1280  # Default reduced for bandwidth
+    roi_height: Optional[int] = 800
+    roi_offset_x: Optional[int] = None  # None = centered
+    roi_offset_y: Optional[int] = None  # None = centered
+
     # Trigger settings
     trigger_mode: TriggerMode = TriggerMode.HARDWARE
     trigger_source: str = "Line1"  # GPIO input line
