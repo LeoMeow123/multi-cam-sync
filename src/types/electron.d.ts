@@ -37,7 +37,7 @@ export interface ElectronAPI {
   };
 
   recording: {
-    start: () => Promise<boolean>;
+    start: (sessionName?: string) => Promise<boolean>;
     stop: () => Promise<{ frameCounts: Record<string, number>; synced: boolean }>;
     getStatus: () => Promise<RecordingStatus>;
     setConfig: (config: Partial<RecordingConfig>) => Promise<void>;
