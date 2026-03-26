@@ -283,12 +283,24 @@ class CameraManager:
         """
         Grab a single frame (software trigger).
 
+        Temporarily switches to free-running mode if the camera is in
+        hardware trigger mode, then restores the previous mode afterwards.
+
         Returns:
             Image as numpy array, or None on failure
         """
         if not self.is_open or not self.camera:
             print("ERROR:Camera not connected", flush=True)
             return None
+
+        if self.is_capturing:
+            print("ERROR:Cannot grab preview while capturing", flush=True)
+            return None
+
+        # Remember current trigger mode and switch to software if needed
+        was_hardware = self.settings.trigger_mode == TriggerMode.HARDWARE
+        if was_hardware:
+            self.configure_software_trigger()
 
         try:
             self.camera.StartGrabbingMax(1)
@@ -313,6 +325,9 @@ class CameraManager:
         finally:
             if self.camera.IsGrabbing():
                 self.camera.StopGrabbing()
+            # Restore hardware trigger mode if it was active before
+            if was_hardware:
+                self.configure_hardware_trigger()
 
     def grab_frame_base64(self, format: str = "jpeg", quality: int = 85) -> Optional[str]:
         """
@@ -431,8 +446,11 @@ class CameraManager:
                     self.frame_count += 1
                     timestamp = time.time()
 
-                    # Get frame as numpy array
-                    frame = grab_result.Array
+                    # Get frame as numpy array (must copy before Release)
+                    frame = grab_result.Array.copy()
+                    width = grab_result.Width
+                    height = grab_result.Height
+                    grab_result.Release()
 
                     # Write frame to video
                     if self._video_writer and self._video_writer.isOpened():
@@ -445,11 +463,12 @@ class CameraManager:
                             frame_number=self.frame_count,
                             file_path=str(self._video_path) if self._video_path else "",
                             timestamp=timestamp,
-                            width=grab_result.Width,
-                            height=grab_result.Height,
+                            width=width,
+                            height=height,
                         )
                         self._frame_callback(frame_info)
 
+                elif grab_result:
                     grab_result.Release()
 
             except Exception as e:

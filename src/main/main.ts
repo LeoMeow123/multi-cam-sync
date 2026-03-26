@@ -106,12 +106,30 @@ ipcMain.handle('camera:detect', async () => {
   return await cameraManager.detectCameras();
 });
 
+ipcMain.handle('camera:connect', async (_event, cameraId: string) => {
+  // Single camera connect: initialize manager if needed, then connect one camera
+  if (!cameraManager) {
+    cameraManager = new MultiCameraManager();
+    setupCameraEvents();
+    await cameraManager.initialize(appConfig.cameras);
+  }
+  const results = await cameraManager.connectAll();
+  return results.get(cameraId) || false;
+});
+
+ipcMain.handle('camera:disconnect', async (_event, cameraId: string) => {
+  if (cameraManager) {
+    await cameraManager.disconnectAll();
+  }
+});
+
 ipcMain.handle('camera:connect-all', async () => {
   // Always shutdown existing manager and reinitialize with current config
   if (cameraManager) {
     cameraManager.shutdown();
   }
   cameraManager = new MultiCameraManager();
+  setupCameraEvents();
   await cameraManager.initialize(appConfig.cameras);
   const results = await cameraManager.connectAll();
   return Object.fromEntries(results);
@@ -247,6 +265,18 @@ function setupArduinoEvents(): void {
 
   arduinoManager.on('frame', (frameNumber: number) => {
     sendToRenderer('arduino:frame', frameNumber);
+  });
+}
+
+function setupCameraEvents(): void {
+  if (!cameraManager) return;
+
+  cameraManager.on('camera-error', (cameraId: string, error: string) => {
+    sendToRenderer('camera:error', cameraId, error);
+  });
+
+  cameraManager.on('frame-saved', (frameInfo: any) => {
+    sendToRenderer('camera:frame-saved', frameInfo);
   });
 }
 

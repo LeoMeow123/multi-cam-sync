@@ -2,7 +2,7 @@
  * Main App Component
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import CameraGrid from './components/CameraGrid';
 import RecordingPanel from './components/RecordingPanel';
 import StatusDashboard from './components/StatusDashboard';
@@ -127,10 +127,26 @@ const App: React.FC = () => {
     }, 500);
   };
 
-  // Load initial config
+  // Load initial config and set up event listeners with proper cleanup
   useEffect(() => {
     loadConfig();
-    setupEventListeners();
+
+    const unsubs = [
+      window.electron.arduino.onStateChange((state: string) => {
+        setArduinoStatus((prev) => ({ ...prev, state: state as any }));
+      }),
+      window.electron.arduino.onKilled(() => {
+        alert('Kill switch activated! Recording stopped.');
+      }),
+      window.electron.recording.onStatusChange((status: RecordingStatus) => {
+        setRecordingStatus(status);
+      }),
+      window.electron.camera.onError((cameraId: string, error: string) => {
+        console.error(`Camera ${cameraId} error:`, error);
+      }),
+    ];
+
+    return () => unsubs.forEach((unsub) => unsub());
   }, []);
 
   // Auto-poll hardware status when on the home tab
@@ -161,27 +177,6 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Failed to load config:', error);
     }
-  };
-
-  const setupEventListeners = () => {
-    // Arduino events
-    window.electron.arduino.onStateChange((state: string) => {
-      setArduinoStatus((prev) => ({ ...prev, state: state as any }));
-    });
-
-    window.electron.arduino.onKilled(() => {
-      alert('Kill switch activated! Recording stopped.');
-    });
-
-    // Recording events
-    window.electron.recording.onStatusChange((status: RecordingStatus) => {
-      setRecordingStatus(status);
-    });
-
-    // Camera events
-    window.electron.camera.onError((cameraId: string, error: string) => {
-      console.error(`Camera ${cameraId} error:`, error);
-    });
   };
 
   // Connect to all hardware
@@ -223,36 +218,40 @@ const App: React.FC = () => {
     setArduinoStatus((prev) => ({ ...prev, connected: false, state: 'disconnected' }));
   };
 
-  // Preview refresh
-  let previewInterval: NodeJS.Timeout | null = null;
+  // Preview refresh — useRef avoids stale closure over cameras/recordingStatus
+  const previewIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const camerasRef = useRef(cameras);
+  const recordingStateRef = useRef(recordingStatus.state);
+  camerasRef.current = cameras;
+  recordingStateRef.current = recordingStatus.state;
 
-  const startPreviewRefresh = () => {
-    // Preview disabled temporarily to avoid camera conflicts
-    // TODO: Fix threading issues in Python camera grab
-    console.log('[Preview] Preview refresh disabled for stability');
-    return;
+  const stopPreviewRefresh = useCallback(() => {
+    if (previewIntervalRef.current) {
+      clearInterval(previewIntervalRef.current);
+      previewIntervalRef.current = null;
+    }
+  }, []);
 
+  const startPreviewRefresh = useCallback(() => {
     stopPreviewRefresh();
 
-    previewInterval = setInterval(async () => {
-      if (recordingStatus.state === 'recording') return; // Don't refresh during recording
+    previewIntervalRef.current = setInterval(async () => {
+      if (recordingStateRef.current === 'recording') return;
 
-      const enabledCameras = cameras.filter((c) => c.enabled);
+      const enabledCameras = camerasRef.current.filter((c) => c.enabled);
       for (const camera of enabledCameras) {
         const preview = await window.electron.camera.getPreview(camera.id);
         if (preview) {
           setPreviews((prev) => ({ ...prev, [camera.id]: preview }));
         }
       }
-    }, 500); // 2 FPS preview
-  };
+    }, 500);
+  }, [stopPreviewRefresh]);
 
-  const stopPreviewRefresh = () => {
-    if (previewInterval) {
-      clearInterval(previewInterval);
-      previewInterval = null;
-    }
-  };
+  // Clean up preview interval on unmount
+  useEffect(() => {
+    return () => stopPreviewRefresh();
+  }, [stopPreviewRefresh]);
 
   // Recording controls
   const handleArm = async () => {
