@@ -311,11 +311,18 @@ async function startRecording(sessionName?: string): Promise<boolean> {
   }
 
   // Create session directory with custom name or timestamp fallback
-  const folderName = sessionName || new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const sessionDir = path.join(
-    appConfig.recording.output_dir.replace('~', app.getPath('home')),
-    folderName
-  );
+  const baseFolderName = sessionName || new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const outputDir = appConfig.recording.output_dir.replace('~', app.getPath('home'));
+
+  // Avoid overwriting existing sessions: append -2, -3, etc. if needed
+  let folderName = baseFolderName;
+  let sessionDir = path.join(outputDir, folderName);
+  let suffix = 2;
+  while (fs.existsSync(sessionDir)) {
+    folderName = `${baseFolderName}-${suffix}`;
+    sessionDir = path.join(outputDir, folderName);
+    suffix++;
+  }
 
   try {
     fs.mkdirSync(sessionDir, { recursive: true });
