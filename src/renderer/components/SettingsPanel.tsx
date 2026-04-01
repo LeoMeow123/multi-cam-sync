@@ -33,26 +33,38 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [cameraSettings, setCameraSettings] = useState<CameraSettings>(initialCameraSettings);
   const [detectedCameras, setDetectedCameras] = useState<CameraInfo[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previews, setPreviews] = useState<Record<string, string>>({});
   const [isApplying, setIsApplying] = useState(false);
   const applyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Find first enabled camera for preview
-  const previewCameraId = cameras.find((c) => c.enabled)?.id || null;
+  // All enabled cameras get previews
+  const enabledCameras = cameras.filter((c) => c.enabled);
 
-  // Debounced: apply settings to cameras and refresh preview
+  // Fetch previews for all enabled cameras
+  const fetchPreviews = useCallback(async () => {
+    const results: Record<string, string> = {};
+    await Promise.all(
+      enabledCameras.map(async (cam) => {
+        try {
+          const preview = await window.electron.camera.getPreview(cam.id);
+          if (preview) results[cam.id] = preview;
+        } catch {}
+      })
+    );
+    setPreviews(results);
+  }, [enabledCameras.map((c) => c.id).join(',')]);
+
+  // Debounced: apply settings to cameras and refresh all previews
   const applySettingsLive = useCallback(
     (settings: CameraSettings) => {
       if (applyTimerRef.current) clearTimeout(applyTimerRef.current);
       applyTimerRef.current = setTimeout(async () => {
-        if (!previewCameraId) return;
+        if (enabledCameras.length === 0) return;
         setIsApplying(true);
         try {
           await window.electron.camera.configure(settings);
-          // Small delay for camera to apply new settings
           await new Promise((r) => setTimeout(r, 200));
-          const preview = await window.electron.camera.getPreview(previewCameraId);
-          if (preview) setPreviewUrl(preview);
+          await fetchPreviews();
         } catch (e) {
           console.error('Live preview failed:', e);
         } finally {
@@ -60,20 +72,15 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         }
       }, 300);
     },
-    [previewCameraId]
+    [enabledCameras.length, fetchPreviews]
   );
 
-  // Fetch initial preview on mount
+  // Fetch initial previews on mount
   useEffect(() => {
-    if (previewCameraId) {
-      window.electron.camera
-        .getPreview(previewCameraId)
-        .then((preview: string | null) => {
-          if (preview) setPreviewUrl(preview);
-        })
-        .catch(() => {});
+    if (enabledCameras.length > 0) {
+      fetchPreviews();
     }
-  }, [previewCameraId]);
+  }, []);
 
   const updateSetting = (partial: Partial<CameraSettings>) => {
     const updated = { ...cameraSettings, ...partial };
@@ -360,24 +367,32 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </p>
           </div>
 
-          {/* Live preview */}
-          <div className="w-80 flex-shrink-0">
-            <div className="bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center">
-              {previewUrl ? (
-                <img
-                  src={previewUrl}
-                  alt="Camera preview"
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <span className="text-gray-600 text-sm">
-                  {previewCameraId ? 'No preview available' : 'No cameras enabled'}
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-gray-500 mt-2 text-center">
-              Live preview from {previewCameraId || '—'}
-            </div>
+          {/* Live previews */}
+          <div className="flex-shrink-0 space-y-3">
+            {enabledCameras.length > 0 ? (
+              enabledCameras.map((cam, i) => (
+                <div key={cam.id} className="w-72">
+                  <div className="bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center">
+                    {previews[cam.id] ? (
+                      <img
+                        src={previews[cam.id]}
+                        alt={`${cam.name} preview`}
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <span className="text-gray-600 text-sm">No preview</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1 text-center">
+                    {cam.name || `Camera ${i + 1}`}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="w-72 bg-black rounded-lg aspect-video flex items-center justify-center">
+                <span className="text-gray-600 text-sm">No cameras enabled</span>
+              </div>
+            )}
           </div>
         </div>
       </section>
