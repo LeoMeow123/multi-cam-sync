@@ -237,6 +237,12 @@ function setupArduinoEvents(): void {
     sendToRenderer('recording:status-change', recordingState);
   });
 
+  arduinoManager.on('disarmed', () => {
+    recordingState.state = 'idle';
+    sendToRenderer('arduino:state-change', 'idle');
+    sendToRenderer('recording:status-change', recordingState);
+  });
+
   arduinoManager.on('recording', () => {
     recordingState.state = 'recording';
     recordingStartTime = Date.now();
