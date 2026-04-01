@@ -149,6 +149,19 @@ ipcMain.handle('camera:configure', async (_event, settings: Partial<CameraSettin
   saveConfig(appConfig);
 });
 
+ipcMain.handle('camera:configure-one', async (_event, cameraId: string, settings: Partial<CameraSettings>) => {
+  if (cameraManager) {
+    await cameraManager.configureOne(cameraId, settings);
+  }
+  if (!appConfig.per_camera_settings) appConfig.per_camera_settings = {};
+  appConfig.per_camera_settings[cameraId] = {
+    ...appConfig.camera_settings,
+    ...(appConfig.per_camera_settings[cameraId] || {}),
+    ...settings,
+  };
+  saveConfig(appConfig);
+});
+
 ipcMain.handle('camera:get-preview', async (_event, cameraId: string) => {
   if (!cameraManager) return null;
   return await cameraManager.getPreview(cameraId);

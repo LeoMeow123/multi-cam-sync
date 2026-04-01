@@ -31,6 +31,9 @@ const cameraAPI = {
   configure: (settings: Partial<CameraSettings>): Promise<void> =>
     ipcRenderer.invoke('camera:configure', settings),
 
+  configureOne: (cameraId: string, settings: Partial<CameraSettings>): Promise<void> =>
+    ipcRenderer.invoke('camera:configure-one', cameraId, settings),
+
   getPreview: (cameraId: string): Promise<string | null> =>
     ipcRenderer.invoke('camera:get-preview', cameraId),
 

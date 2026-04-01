@@ -165,6 +165,16 @@ export class MultiCameraManager extends EventEmitter {
   }
 
   /**
+   * Configure a single camera by ID
+   */
+  async configureOne(cameraId: string, settings: object): Promise<void> {
+    const process = this.cameras.get(cameraId);
+    if (process) {
+      await process.sendCommand({ command: 'configure', settings });
+    }
+  }
+
+  /**
    * Start capture on all cameras
    */
   async startCapture(sessionDir: string, fps: number = 120): Promise<void> {

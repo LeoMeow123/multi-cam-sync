@@ -41,6 +41,7 @@ export interface AppConfig {
   cameras: CameraConfig[];
   recording: RecordingConfig;
   camera_settings: CameraSettings;
+  per_camera_settings: Record<string, CameraSettings>;
   arduino: ArduinoConfig;
 }
 
@@ -64,6 +65,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     gamma: 1.0,
     trigger_mode: 'hardware',
   },
+  per_camera_settings: {},
   arduino: {
     port: 'auto',
     baud_rate: 115200,

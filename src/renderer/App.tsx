@@ -54,6 +54,7 @@ const App: React.FC = () => {
     max_duration_seconds: 300,
   });
   const [cameraSettings, setCameraSettings] = useState<CameraSettings>(DEFAULT_CAMERA_SETTINGS);
+  const [perCameraSettings, setPerCameraSettings] = useState<Record<string, CameraSettings>>({});
   const [isConnecting, setIsConnecting] = useState(false);
   const [developerMode, setDeveloperMode] = useState(false);
   const [showDevModeDialog, setShowDevModeDialog] = useState(false);
@@ -177,6 +178,7 @@ const App: React.FC = () => {
       setCameras(config.cameras || []);
       setRecordingConfig(config.recording || recordingConfig);
       if (config.camera_settings) setCameraSettings(config.camera_settings);
+      if (config.per_camera_settings) setPerCameraSettings(config.per_camera_settings);
     } catch (error) {
       console.error('Failed to load config:', error);
     }
@@ -463,6 +465,7 @@ const App: React.FC = () => {
             cameras={cameras}
             recordingConfig={recordingConfig}
             cameraSettings={cameraSettings}
+            perCameraSettings={perCameraSettings}
             arduinoStatus={effectiveArduinoStatus}
             onSave={handleSaveSettings}
             onSelectOutputDir={handleSelectOutputDir}
