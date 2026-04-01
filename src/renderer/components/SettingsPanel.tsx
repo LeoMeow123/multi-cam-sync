@@ -5,13 +5,14 @@
  */
 
 import React, { useState } from 'react';
-import type { CameraConfig, CameraInfo } from '../../types/camera';
+import type { CameraConfig, CameraInfo, CameraSettings } from '../../types/camera';
 import type { ArduinoStatus } from '../../types/arduino';
 import type { RecordingConfig } from '../../types/recording';
 
 interface SettingsPanelProps {
   cameras: CameraConfig[];
   recordingConfig: RecordingConfig;
+  cameraSettings: CameraSettings;
   arduinoStatus: ArduinoStatus;
   onSave: (config: any) => void;
   onSelectOutputDir: () => Promise<string | null>;
@@ -21,6 +22,7 @@ interface SettingsPanelProps {
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
   cameras: initialCameras,
   recordingConfig: initialRecordingConfig,
+  cameraSettings: initialCameraSettings,
   arduinoStatus,
   onSave,
   onSelectOutputDir,
@@ -28,6 +30,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 }) => {
   const [cameras, setCameras] = useState<CameraConfig[]>(initialCameras);
   const [recordingConfig, setRecordingConfig] = useState(initialRecordingConfig);
+  const [cameraSettings, setCameraSettings] = useState<CameraSettings>(initialCameraSettings);
   const [detectedCameras, setDetectedCameras] = useState<CameraInfo[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
 
@@ -63,6 +66,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onSave({
       cameras,
       recording: recordingConfig,
+      camera_settings: cameraSettings,
     });
   };
 
@@ -233,6 +237,80 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             />
           </div>
         </div>
+      </section>
+
+      {/* Camera Image Settings */}
+      <section className="bg-gray-800 rounded-lg p-6">
+        <h2 className="text-xl font-semibold mb-4">Camera Image Settings</h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">
+              Exposure Time ({cameraSettings.exposure_time} μs)
+            </label>
+            <input
+              type="range"
+              min={100}
+              max={30000}
+              step={100}
+              value={cameraSettings.exposure_time}
+              onChange={(e) =>
+                setCameraSettings({ ...cameraSettings, exposure_time: parseInt(e.target.value) })
+              }
+              className="w-full accent-blue-500"
+            />
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>100 μs</span>
+              <span>30,000 μs</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">
+              Gain ({cameraSettings.gain})
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={36}
+              step={1}
+              value={cameraSettings.gain}
+              onChange={(e) =>
+                setCameraSettings({ ...cameraSettings, gain: parseInt(e.target.value) })
+              }
+              className="w-full accent-blue-500"
+            />
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>0</span>
+              <span>36</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">
+              Gamma ({cameraSettings.gamma.toFixed(2)})
+            </label>
+            <input
+              type="range"
+              min={25}
+              max={400}
+              step={5}
+              value={Math.round(cameraSettings.gamma * 100)}
+              onChange={(e) =>
+                setCameraSettings({ ...cameraSettings, gamma: parseInt(e.target.value) / 100 })
+              }
+              className="w-full accent-blue-500"
+            />
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>0.25</span>
+              <span>4.00</span>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-xs text-gray-500 mt-4">
+          Changes apply to all cameras when you click Save Settings. Adjust exposure first, then gain if the image is still too dark.
+        </p>
       </section>
 
       {/* Arduino Settings */}

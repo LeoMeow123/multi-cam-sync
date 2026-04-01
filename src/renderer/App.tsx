@@ -9,7 +9,8 @@ import StatusDashboard from './components/StatusDashboard';
 import SettingsPanel from './components/SettingsPanel';
 import HomePage from './components/HomePage';
 import DeveloperModeDialog from './components/DeveloperModeDialog';
-import type { CameraConfig } from '../types/camera';
+import type { CameraConfig, CameraSettings } from '../types/camera';
+import { DEFAULT_CAMERA_SETTINGS } from '../types/camera';
 import type { ArduinoStatus } from '../types/arduino';
 import type { RecordingStatus, RecordingConfig } from '../types/recording';
 
@@ -52,6 +53,7 @@ const App: React.FC = () => {
     frame_rate: 120,
     max_duration_seconds: 300,
   });
+  const [cameraSettings, setCameraSettings] = useState<CameraSettings>(DEFAULT_CAMERA_SETTINGS);
   const [isConnecting, setIsConnecting] = useState(false);
   const [developerMode, setDeveloperMode] = useState(false);
   const [showDevModeDialog, setShowDevModeDialog] = useState(false);
@@ -174,6 +176,7 @@ const App: React.FC = () => {
       const config = await window.electron.config.load();
       setCameras(config.cameras || []);
       setRecordingConfig(config.recording || recordingConfig);
+      if (config.camera_settings) setCameraSettings(config.camera_settings);
     } catch (error) {
       console.error('Failed to load config:', error);
     }
@@ -281,6 +284,10 @@ const App: React.FC = () => {
     await window.electron.config.save(config);
     setCameras(config.cameras);
     setRecordingConfig(config.recording);
+    if (config.camera_settings) {
+      setCameraSettings(config.camera_settings);
+      await window.electron.camera.configure(config.camera_settings);
+    }
   };
 
   const handleDetectCameras = async () => {
@@ -455,6 +462,7 @@ const App: React.FC = () => {
           <SettingsPanel
             cameras={cameras}
             recordingConfig={recordingConfig}
+            cameraSettings={cameraSettings}
             arduinoStatus={effectiveArduinoStatus}
             onSave={handleSaveSettings}
             onSelectOutputDir={handleSelectOutputDir}
