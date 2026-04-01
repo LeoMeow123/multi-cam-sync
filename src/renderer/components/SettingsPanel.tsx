@@ -363,7 +363,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
 
             <p className="text-xs text-gray-500">
-              Preview updates live as you drag. Click Save Settings to persist.
+              Settings apply live and auto-save as you drag.
             </p>
           </div>
 
