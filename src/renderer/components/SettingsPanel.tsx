@@ -4,7 +4,7 @@
  * Configure cameras, recording settings, and Arduino.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { CameraConfig, CameraInfo, CameraSettings } from '../../types/camera';
 import type { ArduinoStatus } from '../../types/arduino';
 import type { RecordingConfig } from '../../types/recording';
@@ -33,6 +33,53 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [cameraSettings, setCameraSettings] = useState<CameraSettings>(initialCameraSettings);
   const [detectedCameras, setDetectedCameras] = useState<CameraInfo[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isApplying, setIsApplying] = useState(false);
+  const applyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Find first enabled camera for preview
+  const previewCameraId = cameras.find((c) => c.enabled)?.id || null;
+
+  // Debounced: apply settings to cameras and refresh preview
+  const applySettingsLive = useCallback(
+    (settings: CameraSettings) => {
+      if (applyTimerRef.current) clearTimeout(applyTimerRef.current);
+      applyTimerRef.current = setTimeout(async () => {
+        if (!previewCameraId) return;
+        setIsApplying(true);
+        try {
+          await window.electron.camera.configure(settings);
+          // Small delay for camera to apply new settings
+          await new Promise((r) => setTimeout(r, 200));
+          const preview = await window.electron.camera.getPreview(previewCameraId);
+          if (preview) setPreviewUrl(preview);
+        } catch (e) {
+          console.error('Live preview failed:', e);
+        } finally {
+          setIsApplying(false);
+        }
+      }, 300);
+    },
+    [previewCameraId]
+  );
+
+  // Fetch initial preview on mount
+  useEffect(() => {
+    if (previewCameraId) {
+      window.electron.camera
+        .getPreview(previewCameraId)
+        .then((preview: string | null) => {
+          if (preview) setPreviewUrl(preview);
+        })
+        .catch(() => {});
+    }
+  }, [previewCameraId]);
+
+  const updateSetting = (partial: Partial<CameraSettings>) => {
+    const updated = { ...cameraSettings, ...partial };
+    setCameraSettings(updated);
+    applySettingsLive(updated);
+  };
 
   const handleDetectCameras = async () => {
     setIsDetecting(true);
@@ -241,76 +288,98 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       {/* Camera Image Settings */}
       <section className="bg-gray-800 rounded-lg p-6">
-        <h2 className="text-xl font-semibold mb-4">Camera Image Settings</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold">Camera Image Settings</h2>
+          {isApplying && (
+            <span className="text-xs text-blue-400 animate-pulse">Applying...</span>
+          )}
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">
-              Exposure Time ({cameraSettings.exposure_time} μs)
-            </label>
-            <input
-              type="range"
-              min={100}
-              max={30000}
-              step={100}
-              value={cameraSettings.exposure_time}
-              onChange={(e) =>
-                setCameraSettings({ ...cameraSettings, exposure_time: parseInt(e.target.value) })
-              }
-              className="w-full accent-blue-500"
-            />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>100 μs</span>
-              <span>30,000 μs</span>
+        <div className="flex gap-6">
+          {/* Sliders */}
+          <div className="flex-1 space-y-5">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                Exposure Time ({cameraSettings.exposure_time} μs)
+              </label>
+              <input
+                type="range"
+                min={100}
+                max={30000}
+                step={100}
+                value={cameraSettings.exposure_time}
+                onChange={(e) => updateSetting({ exposure_time: parseInt(e.target.value) })}
+                className="w-full accent-blue-500"
+              />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>100 μs</span>
+                <span>30,000 μs</span>
+              </div>
             </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                Gain ({cameraSettings.gain})
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={36}
+                step={1}
+                value={cameraSettings.gain}
+                onChange={(e) => updateSetting({ gain: parseInt(e.target.value) })}
+                className="w-full accent-blue-500"
+              />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>0</span>
+                <span>36</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">
+                Gamma ({cameraSettings.gamma.toFixed(2)})
+              </label>
+              <input
+                type="range"
+                min={25}
+                max={400}
+                step={5}
+                value={Math.round(cameraSettings.gamma * 100)}
+                onChange={(e) => updateSetting({ gamma: parseInt(e.target.value) / 100 })}
+                className="w-full accent-blue-500"
+              />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>0.25</span>
+                <span>4.00</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Preview updates live as you drag. Click Save Settings to persist.
+            </p>
           </div>
 
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">
-              Gain ({cameraSettings.gain})
-            </label>
-            <input
-              type="range"
-              min={0}
-              max={36}
-              step={1}
-              value={cameraSettings.gain}
-              onChange={(e) =>
-                setCameraSettings({ ...cameraSettings, gain: parseInt(e.target.value) })
-              }
-              className="w-full accent-blue-500"
-            />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>0</span>
-              <span>36</span>
+          {/* Live preview */}
+          <div className="w-80 flex-shrink-0">
+            <div className="bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center">
+              {previewUrl ? (
+                <img
+                  src={previewUrl}
+                  alt="Camera preview"
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <span className="text-gray-600 text-sm">
+                  {previewCameraId ? 'No preview available' : 'No cameras enabled'}
+                </span>
+              )}
             </div>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">
-              Gamma ({cameraSettings.gamma.toFixed(2)})
-            </label>
-            <input
-              type="range"
-              min={25}
-              max={400}
-              step={5}
-              value={Math.round(cameraSettings.gamma * 100)}
-              onChange={(e) =>
-                setCameraSettings({ ...cameraSettings, gamma: parseInt(e.target.value) / 100 })
-              }
-              className="w-full accent-blue-500"
-            />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
-              <span>0.25</span>
-              <span>4.00</span>
+            <div className="text-xs text-gray-500 mt-2 text-center">
+              Live preview from {previewCameraId || '—'}
             </div>
           </div>
         </div>
-
-        <p className="text-xs text-gray-500 mt-4">
-          Changes apply to all cameras when you click Save Settings. Adjust exposure first, then gain if the image is still too dark.
-        </p>
       </section>
 
       {/* Arduino Settings */}
