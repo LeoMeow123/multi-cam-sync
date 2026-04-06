@@ -299,10 +299,15 @@ class CameraManager:
 
         # Remember current trigger mode and switch to software if needed
         was_hardware = self.settings.trigger_mode == TriggerMode.HARDWARE
-        if was_hardware:
-            self.configure_software_trigger()
 
         try:
+            # Ensure camera is not grabbing before changing trigger mode
+            if self.camera.IsGrabbing():
+                self.camera.StopGrabbing()
+
+            if was_hardware:
+                self.configure_software_trigger()
+
             self.camera.StartGrabbingMax(1)
 
             grab_result = self.camera.RetrieveResult(
