@@ -50,14 +50,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return perCamSettings[camId] || cameraSettings;
   };
 
-  // Fetch preview for a single camera
+  // Fetch preview for a single camera (non-fatal on error)
   const fetchPreview = useCallback(async (camId: string) => {
     try {
       const preview = await window.electron.camera.getPreview(camId);
       if (preview) {
         setPreviews((prev) => ({ ...prev, [camId]: preview }));
       }
-    } catch {}
+    } catch (e) {
+      // Preview grab can fail in hardware trigger mode — ignore silently
+    }
   }, []);
 
   // Debounced: apply settings to one camera and refresh its preview
@@ -68,13 +70,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         setApplyingCam(camId);
         try {
           await window.electron.camera.configureOne(camId, settings);
-          await new Promise((r) => setTimeout(r, 200));
-          await fetchPreview(camId);
         } catch (e) {
-          console.error(`Live preview failed for ${camId}:`, e);
-        } finally {
-          setApplyingCam(null);
+          console.error(`Configure failed for ${camId}:`, e);
         }
+        // Preview is best-effort — don't let it block or crash
+        await new Promise((r) => setTimeout(r, 200));
+        await fetchPreview(camId);
+        setApplyingCam(null);
       }, 300);
     },
     [fetchPreview]
