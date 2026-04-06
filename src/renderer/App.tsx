@@ -286,14 +286,10 @@ const App: React.FC = () => {
     }
   };
 
-  // Settings
+  // Settings — save config to disk only, don't disrupt live connections
   const handleSaveSettings = async (config: any) => {
     await window.electron.config.save(config);
-    setCameras(config.cameras);
-    setRecordingConfig(config.recording);
-    if (config.camera_settings) {
-      setCameraSettings(config.camera_settings);
-    }
+    if (config.recording) setRecordingConfig(config.recording);
   };
 
   const handleDetectCameras = async () => {

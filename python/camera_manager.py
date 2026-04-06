@@ -279,7 +279,7 @@ class CameraManager:
             print(f"STATUS:Camera {self.camera_id} hardware trigger configured", flush=True)
 
         except Exception as e:
-            print(f"ERROR:Failed to configure hardware trigger: {e}", flush=True)
+            print(f"WARNING:Failed to configure hardware trigger: {e}", flush=True)
 
     def configure_software_trigger(self) -> None:
         """Configure camera for software trigger mode (free-running)."""
@@ -293,7 +293,7 @@ class CameraManager:
             print(f"STATUS:Camera {self.camera_id} software trigger configured", flush=True)
 
         except Exception as e:
-            print(f"ERROR:Failed to configure software trigger: {e}", flush=True)
+            print(f"WARNING:Failed to configure software trigger: {e}", flush=True)
 
     def grab_frame(self) -> Optional[np.ndarray]:
         """
