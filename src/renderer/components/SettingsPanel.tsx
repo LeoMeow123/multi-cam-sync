@@ -42,7 +42,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [previewFailed, setPreviewFailed] = useState<Record<string, boolean>>({});
   const [applyingCam, setApplyingCam] = useState<string | null>(null);
+  const [camStatus, setCamStatus] = useState<Record<string, 'saved' | 'failed'>>({});
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'failed' | null>(null);
   const applyTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const statusTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const enabledCameras = cameras.filter((c) => c.enabled);
 
@@ -67,6 +70,19 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   }, [previewFailed]);
 
+  // Show temporary status for a camera (auto-clears after 2s)
+  const showCamStatus = (camId: string, status: 'saved' | 'failed') => {
+    setCamStatus((prev) => ({ ...prev, [camId]: status }));
+    if (statusTimersRef.current[camId]) clearTimeout(statusTimersRef.current[camId]);
+    statusTimersRef.current[camId] = setTimeout(() => {
+      setCamStatus((prev) => {
+        const next = { ...prev };
+        delete next[camId];
+        return next;
+      });
+    }, 2000);
+  };
+
   // Debounced: apply settings to one camera and refresh its preview
   const applySettingLive = useCallback(
     (camId: string, settings: CameraSettings) => {
@@ -75,8 +91,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         setApplyingCam(camId);
         try {
           await window.electron.camera.configureOne(camId, settings);
+          showCamStatus(camId, 'saved');
         } catch (e) {
           console.error(`Configure failed for ${camId}:`, e);
+          showCamStatus(camId, 'failed');
         }
         // Only attempt preview if it hasn't failed before
         if (!previewFailed[camId]) {
@@ -99,6 +117,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const updated = { ...current, ...partial };
     setPerCamSettings((prev) => ({ ...prev, [camId]: updated }));
     applySettingLive(camId, updated);
+  };
+
+  const resetCamSetting = (camId: string) => {
+    const defaults = { ...DEFAULT_CAMERA_SETTINGS };
+    setPerCamSettings((prev) => ({ ...prev, [camId]: defaults }));
+    applySettingLive(camId, defaults);
   };
 
   const handleDetectCameras = async () => {
@@ -129,12 +153,18 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setCameras(updated);
   };
 
-  const handleSave = () => {
-    onSave({
-      cameras,
-      recording: recordingConfig,
-      camera_settings: cameraSettings,
-    });
+  const handleSave = async () => {
+    try {
+      await onSave({
+        cameras,
+        recording: recordingConfig,
+        camera_settings: cameraSettings,
+      });
+      setSaveStatus('saved');
+    } catch (e) {
+      setSaveStatus('failed');
+    }
+    setTimeout(() => setSaveStatus(null), 3000);
   };
 
   const handleSelectOutputDir = async () => {
@@ -321,9 +351,24 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <div key={cam.id} className="p-4 bg-gray-700 rounded-lg">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-semibold">{cam.name || `Camera ${i + 1}`}</h3>
-                    {isActive && (
-                      <span className="text-xs text-blue-400 animate-pulse">Applying...</span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {isActive && (
+                        <span className="text-xs text-blue-400 animate-pulse">Applying...</span>
+                      )}
+                      {camStatus[cam.id] === 'saved' && (
+                        <span className="text-xs text-green-400">Saved</span>
+                      )}
+                      {camStatus[cam.id] === 'failed' && (
+                        <span className="text-xs text-red-400">Failed</span>
+                      )}
+                      <button
+                        onClick={() => resetCamSetting(cam.id)}
+                        className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition"
+                        title="Reset to defaults"
+                      >
+                        Reset
+                      </button>
+                    </div>
                   </div>
 
                   {/* Preview */}
@@ -410,7 +455,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
 
                   <p className="text-xs text-gray-500 mt-3">
-                    Settings apply live and auto-save as you drag.
+                    Defaults: exposure 8000 μs, gain 0, gamma 1.00
                   </p>
                 </div>
               );
@@ -444,7 +489,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       </section>
 
       {/* Save button */}
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-3">
+        {saveStatus === 'saved' && (
+          <span className="text-sm text-green-400">Settings saved successfully</span>
+        )}
+        {saveStatus === 'failed' && (
+          <span className="text-sm text-red-400">Failed to save settings</span>
+        )}
         <button
           onClick={handleSave}
           className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition"
