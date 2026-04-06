@@ -88,7 +88,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }, 2000);
   };
 
-  // Debounced: apply settings to one camera (no preview in hardware trigger mode)
+  // Debounced: apply settings to one camera (configure only, no preview grab)
   const applySettingLive = useCallback(
     (camId: string, settings: CameraSettings) => {
       if (applyTimersRef.current[camId]) clearTimeout(applyTimersRef.current[camId]);
@@ -101,15 +101,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           console.error(`Configure failed for ${camId}:`, e);
           showCamStatus(camId, 'failed');
         }
-        // Only attempt preview if it hasn't failed before (use ref for fresh value)
-        if (!previewFailedRef.current[camId]) {
-          await new Promise((r) => setTimeout(r, 500));
-          await fetchPreview(camId);
-        }
         setApplyingCam(null);
       }, 300);
     },
-    [fetchPreview]
+    []
   );
 
   // Fetch initial previews on mount (once only)
