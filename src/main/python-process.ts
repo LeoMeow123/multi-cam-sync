@@ -31,6 +31,7 @@ export class PythonProcess extends EventEmitter {
 
   constructor(pythonPath: string, scriptPath: string, scriptArgs: string[] = ['--ipc']) {
     super();
+    this.setMaxListeners(30);
     this.pythonPath = pythonPath;
     this.scriptPath = scriptPath;
     this.scriptArgs = scriptArgs;

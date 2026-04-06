@@ -41,6 +41,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [isDetecting, setIsDetecting] = useState(false);
   const [previews, setPreviews] = useState<Record<string, string>>({});
   const [previewFailed, setPreviewFailed] = useState<Record<string, boolean>>({});
+  const previewFailedRef = useRef<Record<string, boolean>>({});
   const [applyingCam, setApplyingCam] = useState<string | null>(null);
   const [camStatus, setCamStatus] = useState<Record<string, 'saved' | 'failed'>>({});
   const [saveStatus, setSaveStatus] = useState<'saved' | 'failed' | null>(null);
@@ -54,21 +55,25 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return perCamSettings[camId] || cameraSettings;
   };
 
+  const markPreviewFailed = (camId: string) => {
+    previewFailedRef.current[camId] = true;
+    setPreviewFailed((prev) => ({ ...prev, [camId]: true }));
+  };
+
   // Fetch preview for a single camera — stops retrying on failure
   const fetchPreview = useCallback(async (camId: string) => {
-    if (previewFailed[camId]) return; // Don't retry if previously failed
+    if (previewFailedRef.current[camId]) return;
     try {
       const preview = await window.electron.camera.getPreview(camId);
       if (preview) {
         setPreviews((prev) => ({ ...prev, [camId]: preview }));
       } else {
-        setPreviewFailed((prev) => ({ ...prev, [camId]: true }));
+        markPreviewFailed(camId);
       }
     } catch (e) {
-      // Preview grab failed (e.g. hardware trigger mode) — stop retrying
-      setPreviewFailed((prev) => ({ ...prev, [camId]: true }));
+      markPreviewFailed(camId);
     }
-  }, [previewFailed]);
+  }, []);
 
   // Show temporary status for a camera (auto-clears after 2s)
   const showCamStatus = (camId: string, status: 'saved' | 'failed') => {
@@ -83,7 +88,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }, 2000);
   };
 
-  // Debounced: apply settings to one camera and refresh its preview
+  // Debounced: apply settings to one camera (no preview in hardware trigger mode)
   const applySettingLive = useCallback(
     (camId: string, settings: CameraSettings) => {
       if (applyTimersRef.current[camId]) clearTimeout(applyTimersRef.current[camId]);
@@ -96,15 +101,15 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           console.error(`Configure failed for ${camId}:`, e);
           showCamStatus(camId, 'failed');
         }
-        // Only attempt preview if it hasn't failed before
-        if (!previewFailed[camId]) {
-          await new Promise((r) => setTimeout(r, 200));
+        // Only attempt preview if it hasn't failed before (use ref for fresh value)
+        if (!previewFailedRef.current[camId]) {
+          await new Promise((r) => setTimeout(r, 500));
           await fetchPreview(camId);
         }
         setApplyingCam(null);
       }, 300);
     },
-    [fetchPreview, previewFailed]
+    [fetchPreview]
   );
 
   // Fetch initial previews on mount (once only)
