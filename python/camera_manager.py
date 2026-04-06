@@ -270,7 +270,10 @@ class CameraManager:
             self.camera.TriggerSelector.Value = "FrameStart"
             self.camera.TriggerMode.Value = "On"
             self.camera.TriggerSource.Value = self.settings.trigger_source
-            self.camera.TriggerActivation.Value = self.settings.trigger_activation.value
+            # trigger_activation can be an enum or a plain string (from JSON config)
+            activation = self.settings.trigger_activation
+            activation_value = activation.value if hasattr(activation, 'value') else str(activation)
+            self.camera.TriggerActivation.Value = activation_value
 
             self.settings.trigger_mode = TriggerMode.HARDWARE
             print(f"STATUS:Camera {self.camera_id} hardware trigger configured", flush=True)

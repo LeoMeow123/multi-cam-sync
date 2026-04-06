@@ -446,9 +446,10 @@ ipcMain.handle('config:load', async () => {
   return appConfig;
 });
 
-ipcMain.handle('config:save', async (_event, config: AppConfig) => {
-  appConfig = config;
-  saveConfig(config);
+ipcMain.handle('config:save', async (_event, config: Partial<AppConfig>) => {
+  // Merge instead of replace — frontend may send partial config
+  appConfig = { ...appConfig, ...config };
+  saveConfig(appConfig);
 });
 
 ipcMain.handle('config:get-cameras', async () => {
