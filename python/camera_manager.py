@@ -174,6 +174,19 @@ class CameraManager:
                 self.is_open = False
                 print(f"STATUS:Camera {self.camera_id} disconnected", flush=True)
 
+    def _set_node(self, *names: str, value) -> bool:
+        """Try setting a camera node by multiple possible names (old/new Pylon API).
+        Returns True if any name succeeded."""
+        for name in names:
+            try:
+                node = getattr(self.camera, name, None)
+                if node is not None:
+                    node.Value = value
+                    return True
+            except Exception:
+                continue
+        return False
+
     def _configure_camera(self) -> None:
         """Configure camera parameters based on settings."""
         if not self.camera:
@@ -183,17 +196,17 @@ class CameraManager:
             # Configure ROI first (must be done before other settings)
             self._configure_roi()
 
-            # Exposure time
-            self.camera.ExposureTimeAbs.Value = self.settings.exposure_time
+            # Exposure time (ExposureTime for ace2/newer, ExposureTimeAbs for older)
+            self._set_node("ExposureTime", "ExposureTimeAbs", value=self.settings.exposure_time)
 
-            # Gain
-            self.camera.GainAuto.Value = "Off"
-            self.camera.GainRaw.Value = self.settings.gain
+            # Gain (Gain for ace2/newer, GainRaw for older)
+            self._set_node("GainAuto", value="Off")
+            self._set_node("Gain", "GainRaw", value=self.settings.gain)
 
             # Gamma
-            self.camera.GammaEnable.Value = True
-            self.camera.GammaSelector.Value = "User"
-            self.camera.Gamma.Value = self.settings.gamma
+            self._set_node("GammaEnable", value=True)
+            self._set_node("GammaSelector", value="User")
+            self._set_node("Gamma", value=self.settings.gamma)
 
             print(f"STATUS:Camera {self.camera_id} configured", flush=True)
 
