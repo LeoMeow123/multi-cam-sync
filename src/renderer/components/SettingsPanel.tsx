@@ -40,6 +40,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [detectedCameras, setDetectedCameras] = useState<CameraInfo[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
   const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [previewFailed, setPreviewFailed] = useState<Record<string, boolean>>({});
   const [applyingCam, setApplyingCam] = useState<string | null>(null);
   const applyTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -50,17 +51,21 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return perCamSettings[camId] || cameraSettings;
   };
 
-  // Fetch preview for a single camera (non-fatal on error)
+  // Fetch preview for a single camera — stops retrying on failure
   const fetchPreview = useCallback(async (camId: string) => {
+    if (previewFailed[camId]) return; // Don't retry if previously failed
     try {
       const preview = await window.electron.camera.getPreview(camId);
       if (preview) {
         setPreviews((prev) => ({ ...prev, [camId]: preview }));
+      } else {
+        setPreviewFailed((prev) => ({ ...prev, [camId]: true }));
       }
     } catch (e) {
-      // Preview grab can fail in hardware trigger mode — ignore silently
+      // Preview grab failed (e.g. hardware trigger mode) — stop retrying
+      setPreviewFailed((prev) => ({ ...prev, [camId]: true }));
     }
-  }, []);
+  }, [previewFailed]);
 
   // Debounced: apply settings to one camera and refresh its preview
   const applySettingLive = useCallback(
@@ -73,16 +78,18 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         } catch (e) {
           console.error(`Configure failed for ${camId}:`, e);
         }
-        // Preview is best-effort — don't let it block or crash
-        await new Promise((r) => setTimeout(r, 200));
-        await fetchPreview(camId);
+        // Only attempt preview if it hasn't failed before
+        if (!previewFailed[camId]) {
+          await new Promise((r) => setTimeout(r, 200));
+          await fetchPreview(camId);
+        }
         setApplyingCam(null);
       }, 300);
     },
-    [fetchPreview]
+    [fetchPreview, previewFailed]
   );
 
-  // Fetch initial previews on mount
+  // Fetch initial previews on mount (once only)
   useEffect(() => {
     enabledCameras.forEach((cam) => fetchPreview(cam.id));
   }, []);
@@ -328,7 +335,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         className="w-full h-full object-contain"
                       />
                     ) : (
-                      <span className="text-gray-600 text-sm">No preview</span>
+                      <span className="text-gray-600 text-sm text-center px-4">
+                        {previewFailed[cam.id]
+                          ? 'Preview unavailable in hardware trigger mode'
+                          : 'Loading preview...'}
+                      </span>
                     )}
                   </div>
 

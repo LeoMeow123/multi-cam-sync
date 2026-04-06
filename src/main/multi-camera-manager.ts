@@ -229,18 +229,31 @@ export class MultiCameraManager extends EventEmitter {
     if (!process) return null;
 
     return new Promise((resolve) => {
+      let settled = false;
+
       const handler = (dataUri: string) => {
-        process.removeListener('preview', handler);
+        if (settled) return;
+        settled = true;
         resolve(dataUri);
       };
 
-      process.once('preview', handler);
-      process.sendCommand({ command: 'get_preview' }).catch(() => resolve(null));
-
-      // Timeout
-      setTimeout(() => {
-        process.removeListener('preview', handler);
+      const errorHandler = (error: string) => {
+        if (settled) return;
+        settled = true;
         resolve(null);
+      };
+
+      process.once('preview', handler);
+      process.once('error', errorHandler);
+      process.sendCommand({ command: 'get_preview' }).catch(() => {
+        if (!settled) { settled = true; resolve(null); }
+      });
+
+      // Timeout — clean up listeners
+      setTimeout(() => {
+        if (!settled) { settled = true; resolve(null); }
+        process.removeListener('preview', handler);
+        process.removeListener('error', errorHandler);
       }, 5000);
     });
   }
