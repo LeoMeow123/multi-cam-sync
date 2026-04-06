@@ -240,6 +240,11 @@ const App: React.FC = () => {
   const startPreviewRefresh = useCallback(() => {
     stopPreviewRefresh();
 
+    // Don't start preview polling in hardware trigger mode — grabs will
+    // always timeout and poison the IPC command queue. Preview refresh
+    // only works in software/free-run trigger mode.
+    if (cameraSettings.trigger_mode === 'hardware') return;
+
     previewIntervalRef.current = setInterval(async () => {
       if (recordingStateRef.current === 'recording') return;
 
@@ -251,7 +256,7 @@ const App: React.FC = () => {
         }
       }
     }, 500);
-  }, [stopPreviewRefresh]);
+  }, [stopPreviewRefresh, cameraSettings.trigger_mode]);
 
   // Clean up preview interval on unmount
   useEffect(() => {
