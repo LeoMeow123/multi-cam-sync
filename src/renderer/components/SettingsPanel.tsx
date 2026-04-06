@@ -107,10 +107,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     []
   );
 
-  // Fetch initial previews on mount (once only)
-  useEffect(() => {
-    enabledCameras.forEach((cam) => fetchPreview(cam.id));
-  }, []);
+  // No automatic preview on mount — cameras are typically in hardware trigger
+  // mode and preview grabs would fail and poison the IPC command queue.
+  // Users can click "Refresh Preview" manually if needed.
 
   const updateCamSetting = (camId: string, partial: Partial<CameraSettings>) => {
     const current = getSettings(camId);
@@ -372,7 +371,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
 
                   {/* Preview */}
-                  <div className="bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center mb-4">
+                  <div className="bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center mb-2">
                     {previews[cam.id] ? (
                       <img
                         src={previews[cam.id]}
@@ -383,10 +382,18 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       <span className="text-gray-600 text-sm text-center px-4">
                         {previewFailed[cam.id]
                           ? 'Preview unavailable in hardware trigger mode'
-                          : 'Loading preview...'}
+                          : 'Click Refresh Preview to capture'}
                       </span>
                     )}
                   </div>
+                  {!previewFailed[cam.id] && (
+                    <button
+                      onClick={() => fetchPreview(cam.id)}
+                      className="w-full mb-3 px-3 py-1.5 text-xs bg-gray-600 hover:bg-gray-500 rounded transition"
+                    >
+                      Refresh Preview
+                    </button>
+                  )}
 
                   {/* Sliders */}
                   <div className="space-y-4">
