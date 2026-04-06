@@ -288,7 +288,6 @@ const App: React.FC = () => {
     setRecordingConfig(config.recording);
     if (config.camera_settings) {
       setCameraSettings(config.camera_settings);
-      await window.electron.camera.configure(config.camera_settings);
     }
   };
 
