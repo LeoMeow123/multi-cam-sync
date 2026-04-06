@@ -204,8 +204,7 @@ const App: React.FC = () => {
       const statuses = await window.electron.camera.getStatus();
       setCameraStatus(statuses);
 
-      // Start preview refresh
-      startPreviewRefresh();
+      // Preview polling disabled for hardware trigger mode
     } catch (error) {
       console.error('Connection error:', error);
     } finally {
@@ -215,7 +214,6 @@ const App: React.FC = () => {
 
   // Disconnect all
   const handleDisconnect = async () => {
-    stopPreviewRefresh();
     await window.electron.camera.disconnectAll();
     await window.electron.arduino.disconnect();
     setCameraStatus({});
@@ -223,45 +221,9 @@ const App: React.FC = () => {
     setArduinoStatus((prev) => ({ ...prev, connected: false, state: 'disconnected' }));
   };
 
-  // Preview refresh — useRef avoids stale closure over cameras/recordingStatus
-  const previewIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const camerasRef = useRef(cameras);
-  const recordingStateRef = useRef(recordingStatus.state);
-  camerasRef.current = cameras;
-  recordingStateRef.current = recordingStatus.state;
-
-  const stopPreviewRefresh = useCallback(() => {
-    if (previewIntervalRef.current) {
-      clearInterval(previewIntervalRef.current);
-      previewIntervalRef.current = null;
-    }
-  }, []);
-
-  const startPreviewRefresh = useCallback(() => {
-    stopPreviewRefresh();
-
-    // Don't start preview polling in hardware trigger mode — grabs will
-    // always timeout and poison the IPC command queue. Preview refresh
-    // only works in software/free-run trigger mode.
-    if (cameraSettings.trigger_mode === 'hardware') return;
-
-    previewIntervalRef.current = setInterval(async () => {
-      if (recordingStateRef.current === 'recording') return;
-
-      const enabledCameras = camerasRef.current.filter((c) => c.enabled);
-      for (const camera of enabledCameras) {
-        const preview = await window.electron.camera.getPreview(camera.id);
-        if (preview) {
-          setPreviews((prev) => ({ ...prev, [camera.id]: preview }));
-        }
-      }
-    }, 500);
-  }, [stopPreviewRefresh, cameraSettings.trigger_mode]);
-
-  // Clean up preview interval on unmount
-  useEffect(() => {
-    return () => stopPreviewRefresh();
-  }, [stopPreviewRefresh]);
+  // Preview polling disabled — cameras are in hardware trigger mode and
+  // getPreview grabs always timeout, corrupting the IPC command queue.
+  // Preview is available on-demand via the Refresh Preview button in Settings.
 
   // Recording controls
   const handleArm = async () => {
@@ -274,12 +236,10 @@ const App: React.FC = () => {
 
   const handleStartRecording = async (sessionName?: string) => {
     await window.electron.recording.start(sessionName);
-    stopPreviewRefresh();
   };
 
   const handleStopRecording = async () => {
     const result = await window.electron.recording.stop();
-    startPreviewRefresh();
 
     if (!result.synced) {
       alert(`Warning: Frame count mismatch!\n${JSON.stringify(result.frameCounts, null, 2)}`);
