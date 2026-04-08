@@ -2,19 +2,18 @@
  * Settings Panel Component
  *
  * Configure cameras, recording settings, and Arduino.
+ * Camera image settings (exposure/gain/gamma) are handled by the
+ * standalone Camera Settings app (python/camera_settings_app.py).
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { CameraConfig, CameraInfo, CameraSettings } from '../../types/camera';
-import { DEFAULT_CAMERA_SETTINGS } from '../../types/camera';
+import React, { useState } from 'react';
+import type { CameraConfig, CameraInfo } from '../../types/camera';
 import type { ArduinoStatus } from '../../types/arduino';
 import type { RecordingConfig } from '../../types/recording';
 
 interface SettingsPanelProps {
   cameras: CameraConfig[];
   recordingConfig: RecordingConfig;
-  cameraSettings: CameraSettings;
-  perCameraSettings: Record<string, CameraSettings>;
   arduinoStatus: ArduinoStatus;
   onSave: (config: any) => void;
   onSelectOutputDir: () => Promise<string | null>;
@@ -24,8 +23,6 @@ interface SettingsPanelProps {
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
   cameras: initialCameras,
   recordingConfig: initialRecordingConfig,
-  cameraSettings: initialCameraSettings,
-  perCameraSettings: initialPerCameraSettings,
   arduinoStatus,
   onSave,
   onSelectOutputDir,
@@ -33,96 +30,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 }) => {
   const [cameras, setCameras] = useState<CameraConfig[]>(initialCameras);
   const [recordingConfig, setRecordingConfig] = useState(initialRecordingConfig);
-  const [cameraSettings] = useState<CameraSettings>(initialCameraSettings);
-  const [perCamSettings, setPerCamSettings] = useState<Record<string, CameraSettings>>(
-    initialPerCameraSettings
-  );
   const [detectedCameras, setDetectedCameras] = useState<CameraInfo[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
-  const [previews, setPreviews] = useState<Record<string, string>>({});
-  const [previewFailed, setPreviewFailed] = useState<Record<string, boolean>>({});
-  const previewFailedRef = useRef<Record<string, boolean>>({});
-  const [applyingCam, setApplyingCam] = useState<string | null>(null);
-  const [camStatus, setCamStatus] = useState<Record<string, 'saved' | 'failed'>>({});
   const [saveStatus, setSaveStatus] = useState<'saved' | 'failed' | null>(null);
-  const applyTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const statusTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-
-  const enabledCameras = cameras.filter((c) => c.enabled);
-
-  // Get effective settings for a camera (per-camera override or global default)
-  const getSettings = (camId: string): CameraSettings => {
-    return perCamSettings[camId] || cameraSettings;
-  };
-
-  const markPreviewFailed = (camId: string) => {
-    previewFailedRef.current[camId] = true;
-    setPreviewFailed((prev) => ({ ...prev, [camId]: true }));
-  };
-
-  // Fetch preview for a single camera — stops retrying on failure
-  const fetchPreview = useCallback(async (camId: string) => {
-    if (previewFailedRef.current[camId]) return;
-    try {
-      const preview = await window.electron.camera.getPreview(camId);
-      if (preview) {
-        setPreviews((prev) => ({ ...prev, [camId]: preview }));
-      } else {
-        markPreviewFailed(camId);
-      }
-    } catch (e) {
-      markPreviewFailed(camId);
-    }
-  }, []);
-
-  // Show temporary status for a camera (auto-clears after 2s)
-  const showCamStatus = (camId: string, status: 'saved' | 'failed') => {
-    setCamStatus((prev) => ({ ...prev, [camId]: status }));
-    if (statusTimersRef.current[camId]) clearTimeout(statusTimersRef.current[camId]);
-    statusTimersRef.current[camId] = setTimeout(() => {
-      setCamStatus((prev) => {
-        const next = { ...prev };
-        delete next[camId];
-        return next;
-      });
-    }, 2000);
-  };
-
-  // Debounced: apply settings to one camera (configure only, no preview grab)
-  const applySettingLive = useCallback(
-    (camId: string, settings: CameraSettings) => {
-      if (applyTimersRef.current[camId]) clearTimeout(applyTimersRef.current[camId]);
-      applyTimersRef.current[camId] = setTimeout(async () => {
-        setApplyingCam(camId);
-        try {
-          await window.electron.camera.configureOne(camId, settings);
-          showCamStatus(camId, 'saved');
-        } catch (e) {
-          console.error(`Configure failed for ${camId}:`, e);
-          showCamStatus(camId, 'failed');
-        }
-        setApplyingCam(null);
-      }, 300);
-    },
-    []
-  );
-
-  // No automatic preview on mount — cameras are typically in hardware trigger
-  // mode and preview grabs would fail and poison the IPC command queue.
-  // Users can click "Refresh Preview" manually if needed.
-
-  const updateCamSetting = (camId: string, partial: Partial<CameraSettings>) => {
-    const current = getSettings(camId);
-    const updated = { ...current, ...partial };
-    setPerCamSettings((prev) => ({ ...prev, [camId]: updated }));
-    applySettingLive(camId, updated);
-  };
-
-  const resetCamSetting = (camId: string) => {
-    const defaults = { ...DEFAULT_CAMERA_SETTINGS };
-    setPerCamSettings((prev) => ({ ...prev, [camId]: defaults }));
-    applySettingLive(camId, defaults);
-  };
 
   const handleDetectCameras = async () => {
     setIsDetecting(true);
@@ -157,7 +67,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       await onSave({
         cameras,
         recording: recordingConfig,
-        camera_settings: cameraSettings,
       });
       setSaveStatus('saved');
     } catch (e) {
@@ -174,7 +83,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8">
+    <div className="max-w-4xl mx-auto space-y-8">
       {/* Camera Configuration */}
       <section className="bg-gray-800 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
@@ -335,140 +244,19 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       </section>
 
-      {/* Camera Image Settings — per camera */}
+      {/* Camera Image Settings — external app */}
       <section className="bg-gray-800 rounded-lg p-6">
-        <h2 className="text-xl font-semibold mb-4">Camera Image Settings</h2>
-
-        {enabledCameras.length === 0 ? (
-          <p className="text-gray-500 text-sm">No cameras enabled.</p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {enabledCameras.map((cam, i) => {
-              const s = getSettings(cam.id);
-              const isActive = applyingCam === cam.id;
-              return (
-                <div key={cam.id} className="p-4 bg-gray-700 rounded-lg">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold">{cam.name || `Camera ${i + 1}`}</h3>
-                    <div className="flex items-center gap-2">
-                      {isActive && (
-                        <span className="text-xs text-blue-400 animate-pulse">Applying...</span>
-                      )}
-                      {camStatus[cam.id] === 'saved' && (
-                        <span className="text-xs text-green-400">Saved</span>
-                      )}
-                      {camStatus[cam.id] === 'failed' && (
-                        <span className="text-xs text-red-400">Failed</span>
-                      )}
-                      <button
-                        onClick={() => resetCamSetting(cam.id)}
-                        className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded transition"
-                        title="Reset to defaults"
-                      >
-                        Reset
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Preview */}
-                  <div className="bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center mb-2">
-                    {previews[cam.id] ? (
-                      <img
-                        src={previews[cam.id]}
-                        alt={`${cam.name} preview`}
-                        className="w-full h-full object-contain"
-                      />
-                    ) : (
-                      <span className="text-gray-600 text-sm text-center px-4">
-                        {previewFailed[cam.id]
-                          ? 'Preview unavailable in hardware trigger mode'
-                          : 'Click Refresh Preview to capture'}
-                      </span>
-                    )}
-                  </div>
-                  {!previewFailed[cam.id] && (
-                    <button
-                      onClick={() => fetchPreview(cam.id)}
-                      className="w-full mb-3 px-3 py-1.5 text-xs bg-gray-600 hover:bg-gray-500 rounded transition"
-                    >
-                      Refresh Preview
-                    </button>
-                  )}
-
-                  {/* Sliders */}
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-1">
-                        Exposure ({s.exposure_time} μs)
-                      </label>
-                      <input
-                        type="range"
-                        min={100}
-                        max={30000}
-                        step={100}
-                        value={s.exposure_time}
-                        onChange={(e) =>
-                          updateCamSetting(cam.id, { exposure_time: parseInt(e.target.value) })
-                        }
-                        className="w-full accent-blue-500"
-                      />
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
-                        <span>100</span>
-                        <span>30,000</span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-1">
-                        Gain ({s.gain})
-                      </label>
-                      <input
-                        type="range"
-                        min={0}
-                        max={36}
-                        step={1}
-                        value={s.gain}
-                        onChange={(e) =>
-                          updateCamSetting(cam.id, { gain: parseInt(e.target.value) })
-                        }
-                        className="w-full accent-blue-500"
-                      />
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
-                        <span>0</span>
-                        <span>36</span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-1">
-                        Gamma ({s.gamma.toFixed(2)})
-                      </label>
-                      <input
-                        type="range"
-                        min={25}
-                        max={400}
-                        step={5}
-                        value={Math.round(s.gamma * 100)}
-                        onChange={(e) =>
-                          updateCamSetting(cam.id, { gamma: parseInt(e.target.value) / 100 })
-                        }
-                        className="w-full accent-blue-500"
-                      />
-                      <div className="flex justify-between text-xs text-gray-500 mt-1">
-                        <span>0.25</span>
-                        <span>4.00</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-gray-500 mt-3">
-                    Defaults: exposure 8000 μs, gain 0, gamma 1.00
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <h2 className="text-xl font-semibold mb-2">Camera Image Settings</h2>
+        <p className="text-sm text-gray-400 mb-3">
+          Exposure, gain, and gamma are configured using the standalone Camera Settings app,
+          which provides live preview while adjusting.
+        </p>
+        <div className="p-3 bg-gray-700 rounded font-mono text-sm text-gray-300">
+          python python/camera_settings_app.py
+        </div>
+        <p className="text-xs text-gray-500 mt-2">
+          Run this before recording. Settings are saved and automatically applied when cameras connect.
+        </p>
       </section>
 
       {/* Arduino Settings */}
