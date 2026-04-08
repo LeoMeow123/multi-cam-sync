@@ -199,7 +199,8 @@ const App: React.FC = () => {
       const statuses = await window.electron.camera.getStatus();
       setCameraStatus(statuses);
 
-      // Preview polling disabled for hardware trigger mode
+      // Reset preview failure tracking for fresh connection
+      previewFailedRef.current.clear();
     } catch (error) {
       console.error('Connection error:', error);
     } finally {
@@ -216,9 +217,40 @@ const App: React.FC = () => {
     setArduinoStatus((prev) => ({ ...prev, connected: false, state: 'disconnected' }));
   };
 
-  // Preview polling disabled — cameras are in hardware trigger mode and
-  // getPreview grabs always timeout, corrupting the IPC command queue.
-  // Preview is available on-demand via the Refresh Preview button in Settings.
+  // Preview polling — only active on the cameras tab, stops during recording.
+  // Tracks failed cameras to avoid retrying and corrupting the IPC queue.
+  const previewFailedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (activeTab !== 'cameras') return;
+    if (recordingStatus.state === 'recording') return;
+
+    const enabledCams = cameras.filter((c) => c.enabled);
+    if (enabledCams.length === 0) return;
+
+    let active = true;
+
+    const poll = async () => {
+      for (const cam of enabledCams) {
+        if (!active) break;
+        if (previewFailedRef.current.has(cam.id)) continue;
+        try {
+          const preview = await window.electron.camera.getPreview(cam.id);
+          if (preview && active) {
+            setPreviews((prev) => ({ ...prev, [cam.id]: preview }));
+          } else if (!preview) {
+            previewFailedRef.current.add(cam.id);
+          }
+        } catch {
+          previewFailedRef.current.add(cam.id);
+        }
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 1000);
+    return () => { active = false; clearInterval(interval); };
+  }, [activeTab, cameras, recordingStatus.state]);
 
   // Recording controls
   const handleArm = async () => {
