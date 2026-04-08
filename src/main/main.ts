@@ -132,6 +132,22 @@ ipcMain.handle('camera:connect-all', async () => {
   setupCameraEvents();
   await cameraManager.initialize(appConfig.cameras);
   const results = await cameraManager.connectAll();
+
+  // Apply saved per-camera settings (from Camera Settings app)
+  const perCam = appConfig.per_camera_settings || {};
+  const globalSettings = appConfig.camera_settings || {};
+  for (const cam of appConfig.cameras.filter(c => c.enabled)) {
+    const settings = perCam[cam.id] || globalSettings;
+    if (settings && Object.keys(settings).length > 0) {
+      try {
+        await cameraManager.configureOne(cam.id, settings);
+        console.log(`[Main] Applied saved settings for ${cam.id}`);
+      } catch (e) {
+        console.warn(`[Main] Failed to apply settings for ${cam.id}:`, e);
+      }
+    }
+  }
+
   return Object.fromEntries(results);
 });
 
