@@ -40,9 +40,10 @@ from tkinter import ttk
 # ── Config path ──────────────────────────────────────────────────────────────
 
 if platform.system() == "Windows":
-    CONFIG_DIR = Path(os.environ.get("APPDATA", "~")) / "Camera Sync System"
+    # Must match Electron's app.getPath('userData') which uses package.json "name"
+    CONFIG_DIR = Path(os.environ.get("APPDATA", "~")) / "multi-cam-sync"
 else:
-    CONFIG_DIR = Path.home() / ".config" / "Camera Sync System"
+    CONFIG_DIR = Path.home() / ".config" / "multi-cam-sync"
 
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
