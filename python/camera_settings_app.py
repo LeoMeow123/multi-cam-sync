@@ -193,7 +193,6 @@ def save_camera_settings(cam_id: str, exposure: float, gain: int, gamma: float):
         "exposure_time": exposure,
         "gain": gain,
         "gamma": gamma,
-        "trigger_mode": "hardware",
     }
     save_config(config)
 

@@ -133,15 +133,21 @@ ipcMain.handle('camera:connect-all', async () => {
   await cameraManager.initialize(appConfig.cameras);
   const results = await cameraManager.connectAll();
 
-  // Apply saved per-camera settings (from Camera Settings app)
+  // Apply saved image settings (from Camera Settings app)
+  // Only send exposure/gain/gamma — trigger settings are handled by the camera
+  // manager and must stay as enums, not JSON strings.
   const perCam = appConfig.per_camera_settings || {};
   const globalSettings = appConfig.camera_settings || {};
   for (const cam of appConfig.cameras.filter(c => c.enabled)) {
-    const settings = perCam[cam.id] || globalSettings;
-    if (settings && Object.keys(settings).length > 0) {
+    const raw = perCam[cam.id] || globalSettings;
+    const imageSettings: Record<string, any> = {};
+    if (raw.exposure_time != null) imageSettings.exposure_time = raw.exposure_time;
+    if (raw.gain != null) imageSettings.gain = raw.gain;
+    if (raw.gamma != null) imageSettings.gamma = raw.gamma;
+    if (Object.keys(imageSettings).length > 0) {
       try {
-        await cameraManager.configureOne(cam.id, settings);
-        console.log(`[Main] Applied saved settings for ${cam.id}`);
+        await cameraManager.configureOne(cam.id, imageSettings);
+        console.log(`[Main] Applied saved settings for ${cam.id}:`, imageSettings);
       } catch (e) {
         console.warn(`[Main] Failed to apply settings for ${cam.id}:`, e);
       }
