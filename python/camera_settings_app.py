@@ -95,6 +95,7 @@ class CameraConnection:
         self.camera_id = camera_id
         self.camera = None
         self.connected = False
+        self._grabbing = False
 
     def connect(self) -> bool:
         try:
@@ -117,13 +118,33 @@ class CameraConnection:
             try:
                 if self.camera.IsGrabbing():
                     self.camera.StopGrabbing()
+                self._grabbing = False
                 self.camera.Close()
             except Exception:
                 pass
             self.connected = False
 
+    def start_continuous_grab(self):
+        """Start continuous grabbing for real-time preview."""
+        if not self.connected or not self.camera or self._grabbing:
+            return
+        try:
+            self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+            self._grabbing = True
+        except Exception as e:
+            print(f"Start grab failed {self.camera_id}: {e}")
+
+    def stop_continuous_grab(self):
+        """Stop continuous grabbing."""
+        if self.camera and self._grabbing:
+            try:
+                self.camera.StopGrabbing()
+            except Exception:
+                pass
+            self._grabbing = False
+
     def apply_settings(self, exposure: float, gain: int, gamma: float):
-        """Apply image settings to the camera."""
+        """Apply image settings to the camera (works during continuous grab)."""
         if not self.connected or not self.camera:
             return
         set_node(self.camera, "ExposureTime", "ExposureTimeAbs", value=exposure)
@@ -134,21 +155,32 @@ class CameraConnection:
         set_node(self.camera, "Gamma", value=gamma)
 
     def grab_frame(self) -> Optional[np.ndarray]:
-        """Grab a single frame in free-run mode."""
+        """Grab the latest frame. Uses continuous grab if active, else single grab."""
         if not self.connected or not self.camera:
             return None
         try:
-            self.camera.StartGrabbingMax(1)
-            result = self.camera.RetrieveResult(3000, pylon.TimeoutHandling_ThrowException)
-            if result.GrabSucceeded():
-                img = result.Array.copy()
+            if self._grabbing:
+                # Fast path: just retrieve the latest buffered frame
+                result = self.camera.RetrieveResult(500, pylon.TimeoutHandling_Return)
+                if result and result.GrabSucceeded():
+                    img = result.Array.copy()
+                    result.Release()
+                    return img
+                if result:
+                    result.Release()
+            else:
+                # Fallback: single grab
+                self.camera.StartGrabbingMax(1)
+                result = self.camera.RetrieveResult(3000, pylon.TimeoutHandling_ThrowException)
+                if result.GrabSucceeded():
+                    img = result.Array.copy()
+                    result.Release()
+                    return img
                 result.Release()
-                return img
-            result.Release()
         except Exception as e:
             print(f"Grab failed {self.camera_id}: {e}")
         finally:
-            if self.camera.IsGrabbing():
+            if not self._grabbing and self.camera.IsGrabbing():
                 self.camera.StopGrabbing()
         return None
 
@@ -259,15 +291,35 @@ class CameraPanel(ttk.LabelFrame):
         if fmt is None:
             fmt = lambda v: str(int(v))
 
-        lbl_text = tk.StringVar(value=f"{label}: {fmt(var.get())}")
-        ttk.Label(parent, textvariable=lbl_text).grid(row=row, column=0, sticky="w", pady=2)
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=2)
 
         scale = ttk.Scale(parent, from_=min_val, to=max_val, variable=var, orient="horizontal",
-                          command=lambda v, l=lbl_text, lb=label, f=fmt: (
-                              l.set(f"{lb}: {f(float(v))}"),
-                              self._on_setting_change(),
-                          ))
+                          command=lambda v: self._on_setting_change())
         scale.grid(row=row, column=1, sticky="ew", padx=(10, 0), pady=2)
+
+        # Spinbox for typing / arrow keys
+        spin = tk.Spinbox(parent, from_=min_val, to=max_val, increment=step,
+                          textvariable=var, width=8, justify="center",
+                          font=("JetBrains Mono", 10),
+                          command=self._on_setting_change)
+        spin.grid(row=row, column=2, padx=(8, 0), pady=2)
+        spin.bind("<Return>", lambda e: self._on_setting_change())
+        spin.bind("<FocusOut>", lambda e: self._on_setting_change())
+
+        # Value display with format
+        val_text = tk.StringVar(value=fmt(var.get()))
+        val_label = ttk.Label(parent, textvariable=val_text, foreground="#888888",
+                              font=("JetBrains Mono", 9))
+        val_label.grid(row=row, column=3, padx=(6, 0), pady=2)
+
+        # Keep label in sync
+        def on_var_change(*_):
+            try:
+                val_text.set(fmt(var.get()))
+            except Exception:
+                pass
+        var.trace_add("write", on_var_change)
+
         parent.columnconfigure(1, weight=1)
 
     def _on_setting_change(self):
@@ -302,6 +354,8 @@ class CameraPanel(ttk.LabelFrame):
                 self.gain_var.get(),
                 self.gamma_var.get() / 100.0,
             )
+            # Start continuous grab for real-time preview
+            self.conn.start_continuous_grab()
             self.status_var.set("Connected — live preview")
             self.connect_btn.config(text="Disconnect")
             self.preview_active = True
@@ -341,9 +395,9 @@ class CameraPanel(ttk.LabelFrame):
             self.canvas.delete("all")
             self.canvas.create_image(240, 150, image=self._photo, anchor="center")
 
-        # Schedule next frame (~5 fps for preview)
+        # Schedule next frame (~30 fps with continuous grab)
         if self.preview_active:
-            self._preview_after_id = self.after(200, self._update_preview)
+            self._preview_after_id = self.after(33, self._update_preview)
 
     def _reset(self):
         """Reset to default settings."""
