@@ -185,6 +185,41 @@ npm run format
 npm run lint
 ```
 
+## Syncing external acquisition systems (Intan ephys / PowerLab EMG)
+
+The Arduino fires **all four trigger pins (2–5) simultaneously** on every frame
+(`PORTD |= B00111100` — one port write), so any unused pin is a free **per-frame
+sync output**: 0→5 V TTL, one pulse per captured frame, no firmware or app change
+needed. With 2 cameras on pins 2–3, pins **4 and 5** are available.
+
+Used for the Pfaff-lab collaboration (Intan RHD 128-ch ephys + PowerLab 8/35 EMG
+on the treadmill):
+
+```
+Arduino pin 4 socket ──jumper──► BNC ──► Intan DIGITAL IN 1   (per-frame timestamps)
+Arduino pin 5 socket ──jumper──► BNC ──► PowerLab trigger-in and/or analog channel
+Arduino GND socket   ──jumper──► BNC shields (common ground — required)
+```
+
+- Plug **directly into the Arduino header sockets** (signal pin + GND) — don't tee
+  off the breadboard camera rows (floating-row and wrong-ground-rail mistakes).
+- **Voltage:** Arduino = 5 V TTL. Intan digital-in accepts 2.0–5.5 V logic high;
+  PowerLab trigger is TTL and its analog inputs are ±10 V. No level shifting.
+- **How timestamps work:** the receiving box records the pulse train as a data
+  channel on its own sample clock. Rising edge *k* = video frame *k* (frame 0 =
+  first pulse). Sanity check after every session: edge count must equal the
+  saved frame count (the app's frame verification prints it).
+- **Recommended workflow:** start Intan/PowerLab recording first (Intan in a
+  normal run with the digital channel displayed — not "wait for trigger"), then
+  Start here; the first pulse lands inside their recordings.
+- **Pulse width caveat:** `TRIGGER_PULSE_US` is 50 µs. Cameras only care about the
+  rising edge, but 50 µs is marginal for an Intan sampling at 20 kS/s and mostly
+  invisible to a PowerLab analog channel at typical EMG rates (1–10 kS/s). If the
+  receiver misses pulses, widen it to **1000 µs** (still only 12% duty at 120 fps)
+  and re-upload the firmware — harmless to the cameras.
+- **Frame-rate honesty:** the a2A1920-165g5m cameras cap at 165 fps (we run 120),
+  and the firmware clamps `FPS:` to 1–165.
+
 ## License
 
 MIT
