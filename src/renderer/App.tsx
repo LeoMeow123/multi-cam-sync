@@ -262,14 +262,23 @@ const App: React.FC = () => {
   };
 
   const handleStartRecording = async (sessionName?: string) => {
-    await window.electron.recording.start(sessionName);
+    const result = await window.electron.recording.start(sessionName);
+    if (!result.success) {
+      alert(`Recording not started.\n\n${result.error ?? ''}`);
+    }
   };
 
   const handleStopRecording = async () => {
     const result = await window.electron.recording.stop();
 
     if (!result.synced) {
-      alert(`Warning: Frame count mismatch!\n${JSON.stringify(result.frameCounts, null, 2)}`);
+      const pulses = result.triggerCount ?? 'unknown';
+      alert(
+        `Warning: cameras not proven in sync (${pulses} pulses fired).\n\n` +
+          `${result.warnings.join('\n')}\n\n` +
+          `Frame counts: ${JSON.stringify(result.frameCounts)}\n` +
+          (result.reportPath ? `Details: ${result.reportPath}` : '')
+      );
     }
   };
 

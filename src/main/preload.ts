@@ -7,7 +7,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { CameraSettings, CameraInfo, CameraConfig } from '../types/camera';
 import type { ArduinoStatus } from '../types/arduino';
-import type { RecordingConfig, RecordingStatus } from '../types/recording';
+import type {
+  RecordingConfig,
+  RecordingStatus,
+  StartResult,
+  StopResult,
+} from '../types/recording';
 
 /**
  * Camera API
@@ -113,10 +118,10 @@ const arduinoAPI = {
  * Recording API
  */
 const recordingAPI = {
-  start: (sessionName?: string): Promise<boolean> =>
+  start: (sessionName?: string): Promise<StartResult> =>
     ipcRenderer.invoke('recording:start', sessionName),
 
-  stop: (): Promise<{ frameCounts: Record<string, number>; synced: boolean }> =>
+  stop: (): Promise<StopResult> =>
     ipcRenderer.invoke('recording:stop'),
 
   getStatus: (): Promise<RecordingStatus> =>

@@ -29,6 +29,25 @@ export interface SessionMetadata {
   settings: CameraSettings;
 }
 
+/** What recording:start returns. */
+export interface StartResult {
+  success: boolean;
+  error?: string;
+}
+
+/** What recording:stop returns, and the summary of sync_report.json. */
+export interface StopResult {
+  frameCounts: Record<string, number>;
+  /** True only when every camera's verdict is exact and no pulse was late. */
+  synced: boolean;
+  /** Pulses the Arduino fired, or null when it did not report them. */
+  triggerCount: number | null;
+  /** One line per problem, for the operator. */
+  warnings: string[];
+  /** Path of sync_report.json, or '' when none was written. */
+  reportPath: string;
+}
+
 export interface RecordingStatus {
   state: RecordingState;
   session_id?: string;

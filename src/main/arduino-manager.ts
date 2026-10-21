@@ -12,6 +12,14 @@ import type { ArduinoState, ArduinoStatus, ArduinoConfig } from '../types/arduin
 // Timeout for Arduino commands
 const COMMAND_TIMEOUT_MS = 5000;
 
+/** The Arduino's own count of what it fired, from `STOPPED:<pulses>:<late>`. */
+export interface TriggerCount {
+  /** Pulses fired since START: block ID N on every camera is pulse N. */
+  pulses: number;
+  /** Pulses fired a whole period late (the clock re-anchored there). */
+  late: number;
+}
+
 /**
  * Events emitted by ArduinoManager:
  *   - 'ready': Arduino initialized
@@ -30,6 +38,7 @@ export class ArduinoManager extends EventEmitter {
   private config: ArduinoConfig;
   private state: ArduinoState = 'disconnected';
   private frameCount = 0;
+  private latePulses = 0;
   private fps = 120;
   private activeCameras = 4;
 
@@ -157,7 +166,10 @@ export class ArduinoManager extends EventEmitter {
       this.frameCount = 0;
       this.emit('recording');
     } else if (line.startsWith('STOPPED:')) {
-      this.frameCount = parseInt(line.substring(8), 10);
+      // STOPPED:<pulses>[:<late>] (firmware before 1.1.0 sends no late count)
+      const [pulses, late] = line.substring(8).split(':');
+      this.frameCount = parseInt(pulses, 10);
+      this.latePulses = late !== undefined ? parseInt(late, 10) : 0;
       this.state = 'idle';
       this.emit('stopped', this.frameCount);
     } else if (line === 'KILLED') {
@@ -204,7 +216,8 @@ export class ArduinoManager extends EventEmitter {
   }
 
   /**
-   * Send command and wait for response
+   * Send command and wait for response. An `ERROR:` line rejects, so a
+   * refused command fails at once instead of timing out.
    */
   async sendCommandAsync(
     command: string,
@@ -223,7 +236,11 @@ export class ArduinoManager extends EventEmitter {
 
       const handler = (line: string) => {
         const trimmed = line.trim();
-        if (!expectedResponse || trimmed.startsWith(expectedResponse)) {
+        if (expectedResponse && trimmed.startsWith('ERROR:')) {
+          clearTimeout(timeout);
+          this.parser?.removeListener('data', handler);
+          reject(new Error(`${command}: ${trimmed.substring(6)}`));
+        } else if (!expectedResponse || trimmed.startsWith(expectedResponse)) {
           clearTimeout(timeout);
           this.parser?.removeListener('data', handler);
           resolve(trimmed);
@@ -254,17 +271,47 @@ export class ArduinoManager extends EventEmitter {
   }
 
   /**
-   * Start recording
+   * Set the trigger rate and camera count, each confirmed by the Arduino.
+   * Refused while it is triggering, since a rate change mid-recording breaks
+   * frame N = pulse N.
    */
-  startRecording(): void {
-    this.sendCommand('START');
+  async configure(fps: number, cameras: number): Promise<void> {
+    await this.sendCommandAsync(`FPS:${fps}`, 'FPS_SET:');
+    this.fps = fps;
+    await this.sendCommandAsync(`CAMERAS:${cameras}`, 'CAMERAS_SET:');
+    this.activeCameras = cameras;
   }
 
   /**
-   * Stop recording
+   * Start the triggers and wait for the Arduino to confirm. Call only once
+   * every camera is armed: the first pulse is block ID 1 on every camera.
    */
-  stopRecording(): void {
-    this.sendCommand('STOP');
+  async startTriggers(): Promise<void> {
+    await this.sendCommandAsync('START', 'RECORDING');
+  }
+
+  /**
+   * Stop the triggers and return how many pulses the Arduino fired. After the
+   * kill switch the Arduino has already stopped itself, so this waits for its
+   * STOPPED line instead of sending STOP.
+   */
+  async stopTriggers(): Promise<TriggerCount> {
+    if (this.state === 'recording') {
+      await this.sendCommandAsync('STOP', 'STOPPED:');
+    } else if (this.state === 'stopping') {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          this.removeListener('stopped', onStopped);
+          reject(new Error('Arduino did not report STOPPED after the kill switch'));
+        }, COMMAND_TIMEOUT_MS);
+        const onStopped = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+        this.once('stopped', onStopped);
+      });
+    }
+    return { pulses: this.frameCount, late: this.latePulses };
   }
 
   /**

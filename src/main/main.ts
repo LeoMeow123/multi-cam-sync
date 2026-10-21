@@ -9,8 +9,15 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { MultiCameraManager } from './multi-camera-manager';
 import { ArduinoManager } from './arduino-manager';
-import type { CameraConfig, CameraSettings } from '../types/camera';
-import type { RecordingConfig, RecordingStatus, AppConfig } from '../types/recording';
+import type { CameraConfig, CameraSettings, CameraCaptureResult } from '../types/camera';
+import type {
+  RecordingConfig,
+  RecordingStatus,
+  AppConfig,
+  StartResult,
+  StopResult,
+} from '../types/recording';
+import type { TriggerCount } from './arduino-manager';
 import { DEFAULT_APP_CONFIG, DEFAULT_RECORDING_CONFIG } from '../types/recording';
 import { DEFAULT_ARDUINO_CONFIG } from '../types/arduino';
 
@@ -31,6 +38,16 @@ let recordingState: RecordingStatus = {
 };
 let recordingStartTime: number | null = null;
 let recordingTimer: NodeJS.Timeout | null = null;
+
+// The recording in progress, for its sync report
+let session: { dir: string; id: string; fps: number; startedAt: string } | null = null;
+let startInProgress = false;
+let stopInProgress: Promise<StopResult> | null = null;
+
+/** Minimum time armed cameras are watched for frames before START. */
+const ARM_SETTLE_MIN_MS = 300;
+/** Trigger periods the arm check waits at the recording's rate. */
+const ARM_SETTLE_PERIODS = 5;
 
 // Config file path
 const getConfigPath = () => {
@@ -286,11 +303,15 @@ function setupArduinoEvents(): void {
     sendToRenderer('recording:status-change', recordingState);
   });
 
-  arduinoManager.on('stopped', (frameCount: number) => {
-    stopRecordingTimer();
-    recordingState.state = 'idle';
+  arduinoManager.on('stopped', () => {
     sendToRenderer('arduino:state-change', 'idle');
-    sendToRenderer('recording:status-change', recordingState);
+    // During a recording, stopRecording() owns the state: the cameras are
+    // still draining their last frames when the Arduino reports STOPPED.
+    if (!session && !stopInProgress) {
+      stopRecordingTimer();
+      recordingState.state = 'idle';
+      sendToRenderer('recording:status-change', recordingState);
+    }
   });
 
   arduinoManager.on('killed', () => {
@@ -346,10 +367,14 @@ ipcMain.handle('recording:get-config', async () => {
   return appConfig.recording;
 });
 
-async function startRecording(sessionName?: string): Promise<boolean> {
+async function startRecording(sessionName?: string): Promise<StartResult> {
   if (!cameraManager || !arduinoManager) {
-    return false;
+    return { success: false, error: 'Cameras or Arduino not connected' };
   }
+  if (startInProgress || stopInProgress || recordingState.state === 'recording') {
+    return { success: false, error: 'A recording is already starting, running or stopping' };
+  }
+  startInProgress = true;
 
   // Create session directory with custom name or timestamp fallback
   const baseFolderName = sessionName || new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -365,30 +390,49 @@ async function startRecording(sessionName?: string): Promise<boolean> {
     suffix++;
   }
 
+  const fps = appConfig.recording.frame_rate || 120;
+  const cameraCount = appConfig.cameras.filter((c) => c.enabled).length;
+  let camerasArmed = false;
+
   try {
     fs.mkdirSync(sessionDir, { recursive: true });
 
-    // Start camera capture (configures hardware trigger and starts grabbing)
-    const fps = appConfig.recording.frame_rate || 120;
-    await cameraManager.startCapture(sessionDir, fps);
+    // 1. Set the Arduino's rate. It fires exactly this rate: the scheduler
+    //    advances by the nominal period, so no compensation factor is needed.
+    console.log(`[Recording] Setting Arduino: ${fps} fps, ${cameraCount} cameras`);
+    await arduinoManager.configure(fps, cameraCount);
 
-    // Wait for cameras to be ready for triggers
-    console.log('[Recording] Waiting for cameras to initialize...');
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // 2. Arm every camera. A camera that fails to arm would miss the first
+    //    pulses and count its frames from a later pulse than the others.
+    console.log('[Recording] Arming cameras...');
+    camerasArmed = true;
+    const failures = await cameraManager.startCapture(sessionDir, fps);
+    if (failures.size > 0) {
+      const lines = Array.from(failures.entries()).map(([id, err]) => `${id}: ${err}`);
+      throw new Error(`Not every camera armed, nothing was recorded.\n${lines.join('\n')}`);
+    }
 
-    // Configure Arduino with correct FPS and camera count
-    // Compensate for Arduino timing overhead (~92% efficiency)
-    const arduinoFps = Math.round(fps / 0.92);
-    const cameraCount = appConfig.cameras.filter(c => c.enabled).length;
-    console.log(`[Recording] Setting Arduino: ${arduinoFps} fps (compensated from ${fps} fps), ${cameraCount} cameras`);
-    arduinoManager.setFPS(arduinoFps);
-    arduinoManager.setCameras(cameraCount);
-    await new Promise(resolve => setTimeout(resolve, 100)); // Wait for config
+    // 3. Any frame before START means the triggers are already running
+    //    (another trigger source, or firmware that starts on the button).
+    const settleMs = Math.max(ARM_SETTLE_MIN_MS, (ARM_SETTLE_PERIODS * 1000) / fps);
+    await new Promise((resolve) => setTimeout(resolve, settleMs));
+    const early = Array.from((await cameraManager.capturedFrameCounts()).entries()).filter(
+      ([, n]) => n > 0
+    );
+    if (early.length > 0) {
+      const names = early.map(([id, n]) => `${id} (${n} frames)`).join(', ');
+      throw new Error(
+        `${names} received frames before the Arduino started, so the cameras would count ` +
+          `from different pulses. Nothing was recorded. Check that nothing else drives the ` +
+          `trigger lines and that the Arduino runs firmware 1.1.0 or later.`
+      );
+    }
 
-    // Start Arduino triggering
+    // 4. Start the triggers. Pulse 1 is block ID 1 on every camera.
     console.log('[Recording] Starting Arduino triggers');
-    arduinoManager.startRecording();
+    await arduinoManager.startTriggers();
 
+    session = { dir: sessionDir, id: folderName, fps, startedAt: new Date().toISOString() };
     recordingState = {
       state: 'recording',
       session_id: folderName,
@@ -396,40 +440,123 @@ async function startRecording(sessionName?: string): Promise<boolean> {
       frame_counts: {},
       errors: [],
     };
-
-    return true;
+    return { success: true };
   } catch (error) {
-    console.error('Failed to start recording:', error);
-    recordingState.errors.push(String(error));
-    return false;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Failed to start recording:', message);
+
+    // Roll back: no pulses, no cameras capturing, no half-made session folder
+    if (arduinoManager.getState() === 'recording') {
+      await arduinoManager.stopTriggers().catch(() => undefined);
+    }
+    if (camerasArmed) {
+      await cameraManager.stopCapture().catch(() => undefined);
+    }
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+
+    recordingState = { ...recordingState, state: 'idle', errors: [message] };
+    sendToRenderer('recording:status-change', recordingState);
+    return { success: false, error: message };
+  } finally {
+    startInProgress = false;
   }
 }
 
-async function stopRecording(): Promise<{ frameCounts: Record<string, number>; synced: boolean }> {
+/**
+ * Stop the triggers, then the cameras, and write sync_report.json.
+ *
+ * The Arduino stops first, so its pulse count is final when each camera
+ * drains its last frames and checks its block IDs against it.
+ */
+function stopRecording(): Promise<StopResult> {
+  if (!stopInProgress) {
+    stopInProgress = doStopRecording().finally(() => {
+      stopInProgress = null;
+    });
+  }
+  return stopInProgress;
+}
+
+async function doStopRecording(): Promise<StopResult> {
   stopRecordingTimer();
+  recordingState.state = 'stopping';
+  const warnings: string[] = [];
 
-  // Stop Arduino
+  let triggers: TriggerCount | null = null;
   if (arduinoManager) {
-    arduinoManager.stopRecording();
+    try {
+      triggers = await arduinoManager.stopTriggers();
+    } catch (error) {
+      warnings.push(`Arduino did not report its pulse count: ${error}`);
+    }
   }
 
-  // Stop cameras and get frame counts
-  let frameCounts: Record<string, number> = {};
-  let synced = true;
-
+  let cameras = new Map<string, CameraCaptureResult>();
   if (cameraManager) {
-    const results = await cameraManager.stopCapture();
-    frameCounts = Object.fromEntries(results);
-
-    const sync = cameraManager.verifySyncStatus();
-    synced = sync.synced;
+    cameras = await cameraManager.stopCapture(triggers?.pulses);
   }
 
+  cameras.forEach((r, id) => {
+    if (r.verdict !== 'exact') warnings.push(`${id}: ${r.verdict}, ${r.verdict_reason}`);
+  });
+  if (triggers && triggers.late > 0) {
+    warnings.push(
+      `${triggers.late} pulses fired a whole frame period late; frames after them are ` +
+        `not on the nominal 1/fps grid`
+    );
+  }
+  const synced =
+    triggers !== null &&
+    triggers.late === 0 &&
+    cameras.size > 0 &&
+    Array.from(cameras.values()).every((r) => r.verdict === 'exact');
+
+  const reportPath = session ? writeSyncReport(session, triggers, cameras, synced, warnings) : '';
+  const frameCounts: Record<string, number> = {};
+  cameras.forEach((r, id) => (frameCounts[id] = r.frame_count));
+
+  session = null;
   recordingState.state = 'idle';
   recordingState.frame_counts = frameCounts;
+  recordingState.errors = warnings;
   sendToRenderer('recording:status-change', recordingState);
 
-  return { frameCounts, synced };
+  return {
+    frameCounts,
+    synced,
+    triggerCount: triggers ? triggers.pulses : null,
+    warnings,
+    reportPath,
+  };
+}
+
+function writeSyncReport(
+  s: { dir: string; id: string; fps: number; startedAt: string },
+  triggers: TriggerCount | null,
+  cameras: Map<string, CameraCaptureResult>,
+  synced: boolean,
+  warnings: string[]
+): string {
+  const reportPath = path.join(s.dir, 'sync_report.json');
+  const report = {
+    session_id: s.id,
+    start_time: s.startedAt,
+    end_time: new Date().toISOString(),
+    frame_rate: s.fps,
+    arduino: triggers
+      ? { pulses: triggers.pulses, late_pulses: triggers.late }
+      : { pulses: null, late_pulses: null },
+    synced,
+    warnings,
+    cameras: Object.fromEntries(cameras),
+  };
+  try {
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    return reportPath;
+  } catch (error) {
+    console.error(`Failed to write ${reportPath}:`, error);
+    return '';
+  }
 }
 
 function handleKillSwitch(): void {

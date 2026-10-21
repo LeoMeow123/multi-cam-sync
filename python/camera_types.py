@@ -88,6 +88,10 @@ class CaptureResult:
     end_time: str = ""
     duration_seconds: float = 0.0
     error: Optional[str] = None
+    frames_csv: str = ""
+    block_ids: dict = field(default_factory=dict)
+    verdict: str = ""
+    verdict_reason: str = ""
 
 
 @dataclass

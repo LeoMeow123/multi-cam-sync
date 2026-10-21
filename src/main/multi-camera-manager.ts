@@ -6,7 +6,13 @@
 
 import { EventEmitter } from 'events';
 import { PythonProcess } from './python-process';
-import type { CameraConfig, CameraStatus, CameraInfo, FrameInfo } from '../types/camera';
+import type {
+  CameraConfig,
+  CameraStatus,
+  CameraInfo,
+  FrameInfo,
+  CameraCaptureResult,
+} from '../types/camera';
 
 /**
  * Events:
@@ -175,45 +181,89 @@ export class MultiCameraManager extends EventEmitter {
   }
 
   /**
-   * Start capture on all cameras
+   * Arm every camera for hardware-triggered capture.
+   *
+   * Resolves once each camera has answered, with the error of every camera
+   * that failed to arm (empty when all of them are armed). A camera answers
+   * after StartGrabbing returns, so an armed camera takes the next pulse.
    */
-  async startCapture(sessionDir: string, fps: number = 120): Promise<void> {
+  async startCapture(sessionDir: string, fps: number = 120): Promise<Map<string, string>> {
     // Reset frame counts
     this.frameCountS.forEach((_, id) => this.frameCountS.set(id, 0));
+    const failures = new Map<string, string>();
+
+    if (this.cameras.size === 0) {
+      failures.set('cameras', 'No cameras connected');
+      return failures;
+    }
 
     const promises = Array.from(this.cameras.entries()).map(async ([id, process]) => {
       const outputDir = `${sessionDir}/${id}`;
 
       try {
-        await process.sendCommand({
+        const result = await process.sendCommand({
           command: 'start_capture',
           output_dir: outputDir,
           fps: fps,
         });
-        this.emit('capture-started', id);
+        if (result.success) {
+          this.emit('capture-started', id);
+        } else {
+          failures.set(id, 'Failed to start capture');
+        }
       } catch (error) {
+        failures.set(id, String(error));
         this.emit('camera-error', id, String(error));
       }
     });
 
     await Promise.all(promises);
+    return failures;
   }
 
   /**
-   * Stop capture on all cameras
+   * Frames each camera has captured so far. Read between arming and START,
+   * any frame means the triggers were already running while the cameras
+   * armed, so the cameras would count their frames from different pulses.
    */
-  async stopCapture(): Promise<Map<string, number>> {
-    const results = new Map<string, number>();
+  async capturedFrameCounts(): Promise<Map<string, number>> {
+    const status = await this.getStatus();
+    const counts = new Map<string, number>();
+    status.forEach((s, id) => counts.set(id, s.frame_count || 0));
+    return counts;
+  }
+
+  /**
+   * Stop capture on all cameras, checking each one's block IDs against
+   * `triggerCount`, the number of pulses the Arduino fired.
+   */
+  async stopCapture(triggerCount?: number): Promise<Map<string, CameraCaptureResult>> {
+    const results = new Map<string, CameraCaptureResult>();
 
     const promises = Array.from(this.cameras.entries()).map(async ([id, process]) => {
       try {
-        const result = await process.sendCommand({ command: 'stop_capture' });
+        const result = await process.sendCommand({
+          command: 'stop_capture',
+          trigger_count: triggerCount ?? null,
+        });
         const frameCount = result.frame_count || 0;
-        results.set(id, frameCount);
+        results.set(id, {
+          frame_count: frameCount,
+          verdict: result.verdict || 'unproven',
+          verdict_reason: result.verdict_reason || '',
+          frames_csv: result.frames_csv || '',
+          block_ids: result.block_ids || {},
+        });
         this.emit('capture-stopped', id, frameCount);
       } catch (error) {
         console.error(`[${id}] Stop capture error: ${error}`);
-        results.set(id, this.frameCountS.get(id) || 0);
+        results.set(id, {
+          frame_count: this.frameCountS.get(id) || 0,
+          verdict: 'unproven',
+          verdict_reason: `stop failed: ${error}`,
+          frames_csv: '',
+          block_ids: {},
+        });
       }
     });
 
@@ -294,27 +344,6 @@ export class MultiCameraManager extends EventEmitter {
    */
   getFrameCounts(): Map<string, number> {
     return new Map(this.frameCountS);
-  }
-
-  /**
-   * Verify sync - check if all cameras have same frame count
-   */
-  verifySyncStatus(): { synced: boolean; counts: Record<string, number>; minFrames: number } {
-    const counts: Record<string, number> = {};
-    let minFrames = Infinity;
-    let maxFrames = 0;
-
-    this.frameCountS.forEach((count, id) => {
-      counts[id] = count;
-      minFrames = Math.min(minFrames, count);
-      maxFrames = Math.max(maxFrames, count);
-    });
-
-    return {
-      synced: minFrames === maxFrames,
-      counts,
-      minFrames: minFrames === Infinity ? 0 : minFrames,
-    };
   }
 
   /**

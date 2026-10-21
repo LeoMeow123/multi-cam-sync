@@ -98,7 +98,7 @@ class IPCHandler:
                 self._handle_start_capture(cmd)
 
             elif command == "stop_capture":
-                self._handle_stop_capture()
+                self._handle_stop_capture(cmd)
 
             elif command == "status":
                 self._handle_status()
@@ -192,18 +192,26 @@ class IPCHandler:
         success = self.camera.start_capture(output_dir, frame_callback=on_frame, fps=fps)
         send_data({"success": success, "capturing": success})
 
-    def _handle_stop_capture(self) -> None:
-        """Handle stop_capture command."""
+    def _handle_stop_capture(self, cmd: Dict[str, Any]) -> None:
+        """Handle stop_capture command.
+
+        ``trigger_count`` is the number of pulses the Arduino fired, which the
+        camera's block IDs are checked against.
+        """
         if not self.camera:
             send_error("Camera not initialized")
             return
 
-        result = self.camera.stop_capture()
+        result = self.camera.stop_capture(trigger_count=cmd.get("trigger_count"))
         send_data({
             "success": result.success,
             "frame_count": result.frame_count,
             "output_dir": result.output_dir,
             "error": result.error,
+            "frames_csv": result.frames_csv,
+            "block_ids": result.block_ids,
+            "verdict": result.verdict,
+            "verdict_reason": result.verdict_reason,
         })
 
     def _handle_status(self) -> None:
