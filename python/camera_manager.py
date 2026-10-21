@@ -9,6 +9,7 @@ This module handles individual camera control, including:
 """
 
 import base64
+import csv
 import os
 import sys
 import time
@@ -30,6 +31,7 @@ from camera_types import (
     FrameInfo,
     TriggerMode,
 )
+from sync_check import classify, summarize_block_ids
 
 # Try to import pypylon
 try:
@@ -71,6 +73,15 @@ class CameraManager:
         self._video_writer: Optional[cv2.VideoWriter] = None
         self._video_path: Optional[Path] = None
         self._capture_start_time: Optional[float] = None
+
+        # Per-frame record of the capture: block ID, device clock, host clock.
+        # Written to <camera_id>_frames.csv at stop so frames can be matched
+        # to triggers across cameras.
+        self._draining = threading.Event()
+        self._block_ids: List[int] = []
+        self._device_ts: List[int] = []
+        self._host_ts: List[float] = []
+        self.failed_grabs = 0
 
     @staticmethod
     def detect_cameras() -> List[CameraInfo]:
@@ -383,6 +394,56 @@ class CameraManager:
             print(f"ERROR:Image encoding error: {e}", flush=True)
             return None
 
+    def _read_node(self, *names: str):
+        """Read the first camera node that exists, or None."""
+        for name in names:
+            try:
+                node = getattr(self.camera, name, None)
+                if node is not None:
+                    return node.Value
+            except Exception:
+                continue
+        return None
+
+    def _rate_refusal(self, fps: int) -> Optional[str]:
+        """Why the camera cannot take a frame on every trigger at ``fps``, or None.
+
+        ResultingFrameRate is the camera's own maximum for its current
+        exposure, ROI and frame-rate limit. A trigger that arrives sooner is
+        ignored, consumes no block ID and shifts every later frame, so a
+        recording made anyway would be misaligned without a trace.
+        """
+        max_fps = self._read_node("ResultingFrameRate", "ResultingFrameRateAbs")
+        exposure = self.settings.exposure_time
+        if max_fps is not None:
+            if float(max_fps) < fps:
+                return (
+                    f"Camera {self.camera_id} can take at most {float(max_fps):.1f} fps with "
+                    f"exposure {exposure:.0f} us and this ROI, below the {fps} fps trigger "
+                    f"rate. It would ignore triggers. Shorten the exposure or lower the rate."
+                )
+            return None
+        if exposure >= 1e6 / fps:
+            return (
+                f"Camera {self.camera_id} exposure {exposure:.0f} us is longer than the "
+                f"{1e6 / fps:.0f} us frame period at {fps} fps. It would ignore triggers."
+            )
+        return None
+
+    def _enable_extended_block_ids(self) -> None:
+        """Ask for 64-bit block IDs, so they never wrap. Optional: the 16-bit
+        IDs are unwrapped in software either way."""
+        try:
+            node = self.camera.GetNodeMap().GetNode("GevGVSPExtendedIDMode")
+            if node is not None:
+                node.FromString("On")
+            node = self.camera.GetStreamGrabberNodeMap().GetNode("UseExtendedIdIfAvailable")
+            if node is not None:
+                node.SetValue(True)
+        except Exception as e:
+            print(f"STATUS:Camera {self.camera_id} 64-bit block IDs unavailable ({e}), "
+                  f"unwrapping 16-bit IDs", flush=True)
+
     def start_capture(
         self,
         output_dir: str,
@@ -414,10 +475,22 @@ class CameraManager:
 
         self._frame_callback = frame_callback
         self.frame_count = 0
+        self.failed_grabs = 0
+        self._block_ids = []
+        self._device_ts = []
+        self._host_ts = []
+        self._draining.clear()
         self._capture_start_time = time.time()
 
         # Configure for hardware trigger
         self.configure_hardware_trigger()
+
+        refusal = self._rate_refusal(fps)
+        if refusal:
+            print(f"ERROR:{refusal}", flush=True)
+            return False
+
+        self._enable_extended_block_ids()
 
         # Get camera resolution for video writer
         width = self.camera.Width.Value
@@ -455,17 +528,30 @@ class CameraManager:
         return True
 
     def _capture_loop(self) -> None:
-        """Background thread for capturing frames."""
+        """Background thread for capturing frames.
+
+        At stop it keeps retrieving until the camera goes quiet, so frames
+        still in flight after the last trigger are kept.
+        """
         while self._capture_active.is_set():
             try:
+                draining = self._draining.is_set()
                 # Wait for hardware trigger with timeout
-                grab_result = self.camera.RetrieveResult(
-                    1000, pylon.TimeoutHandling_Return
-                )
+                try:
+                    grab_result = self.camera.RetrieveResult(
+                        250 if draining else 1000, pylon.TimeoutHandling_ThrowException
+                    )
+                except pylon.TimeoutException:
+                    if draining:
+                        break
+                    continue
 
-                if grab_result and grab_result.GrabSucceeded():
+                if grab_result.GrabSucceeded():
                     self.frame_count += 1
                     timestamp = time.time()
+                    self._block_ids.append(int(getattr(grab_result, "BlockID", -1) or -1))
+                    self._device_ts.append(int(getattr(grab_result, "TimeStamp", 0) or 0))
+                    self._host_ts.append(timestamp)
 
                     # Get frame as numpy array (must copy before Release)
                     frame = grab_result.Array.copy()
@@ -489,7 +575,10 @@ class CameraManager:
                         )
                         self._frame_callback(frame_info)
 
-                elif grab_result:
+                else:
+                    # The camera took the trigger but the frame did not arrive
+                    # whole. Its block ID is consumed, so it shows as a gap.
+                    self.failed_grabs += 1
                     grab_result.Release()
 
             except Exception as e:
@@ -498,9 +587,13 @@ class CameraManager:
 
         print(f"STATUS:Camera {self.camera_id} capture loop ended", flush=True)
 
-    def stop_capture(self) -> CaptureResult:
+    def stop_capture(self, trigger_count: Optional[int] = None) -> CaptureResult:
         """
         Stop capture session.
+
+        Call after the Arduino has stopped. The capture loop drains the frames
+        still in flight, then the frame record is written and checked against
+        ``trigger_count``, the number of pulses the Arduino fired.
 
         Returns:
             CaptureResult with session summary
@@ -514,10 +607,11 @@ class CameraManager:
                 error="Not capturing",
             )
 
-        # Signal thread to stop
+        # Drain the frames still in flight, then stop
+        self._draining.set()
+        if self._capture_thread:
+            self._capture_thread.join(timeout=5.0)
         self._capture_active.clear()
-
-        # Wait for thread
         if self._capture_thread:
             self._capture_thread.join(timeout=2.0)
             self._capture_thread = None
@@ -542,12 +636,25 @@ class CameraManager:
 
         self.is_capturing = False
 
+        frames_csv = self._write_frames_csv()
+        summary = summarize_block_ids(self._block_ids)
+        summary["failed_grabs"] = self.failed_grabs
+        check = classify(summary, trigger_count)
+        print(
+            f"STATUS:Camera {self.camera_id} sync: {check['verdict']} ({check['reason']})",
+            flush=True,
+        )
+
         result = CaptureResult(
             camera_id=self.camera_id,
             success=True,
             frame_count=self.frame_count,
             output_dir=str(self._video_path) if self._video_path else str(self._output_dir) if self._output_dir else "",
             duration_seconds=duration,
+            frames_csv=frames_csv,
+            block_ids=summary,
+            verdict=check["verdict"],
+            verdict_reason=check["reason"],
         )
 
         print(
@@ -557,6 +664,25 @@ class CameraManager:
         )
 
         return result
+
+    def _write_frames_csv(self) -> str:
+        """Write one row per saved frame: its index in the video, its block ID
+        (the trigger it answered), the camera clock and the host clock."""
+        if not self._output_dir:
+            return ""
+        path = self._output_dir / f"{self.camera_id}_frames.csv"
+        try:
+            with open(path, "w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["frame_index", "block_id", "device_timestamp", "host_timestamp"])
+                for i, (bid, dts, hts) in enumerate(
+                    zip(self._block_ids, self._device_ts, self._host_ts)
+                ):
+                    w.writerow([i, bid, dts, f"{hts:.6f}"])
+            return str(path)
+        except Exception as e:
+            print(f"ERROR:Failed to write {path}: {e}", flush=True)
+            return ""
 
     def get_status(self) -> CameraStatus:
         """Get current camera status."""

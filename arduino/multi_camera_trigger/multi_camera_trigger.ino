@@ -10,6 +10,16 @@
  * - Physical start button and kill switch
  * - Serial command interface
  *
+ * Synchronization rules:
+ * - Only the host's START command starts the triggers. The start button just
+ *   reports BUTTON:START, so the host can arm every camera before the first
+ *   pulse. A pulse that reaches a camera before it is armed makes that camera
+ *   count its frames from a later trigger than the others.
+ * - One pulse per frame period, never a burst. A loop iteration that runs a
+ *   whole period late fires one late pulse and re-anchors the clock, and the
+ *   late pulse is counted and reported in STOPPED.
+ * - Nothing in loop() blocks: serial input is read a byte at a time.
+ *
  * Pin Assignments:
  *   Pin 2-5: Camera trigger outputs (directly to camera Line1)
  *   Pin 6: Start button (INPUT_PULLUP, active LOW)
@@ -47,6 +57,7 @@ volatile State currentState = STATE_IDLE;
 volatile bool killTriggered = false;
 
 unsigned long frameCount = 0;
+unsigned long latePulses = 0;  // pulses fired a whole period late (clock re-anchored)
 unsigned long frameIntervalUs = 1000000 / DEFAULT_FPS;
 int activeCameras = MAX_CAMERAS;
 int currentFps = DEFAULT_FPS;
@@ -54,6 +65,10 @@ int currentFps = DEFAULT_FPS;
 // Timing
 unsigned long lastTriggerUs = 0;
 unsigned long lastButtonCheck = 0;
+
+// Serial input, assembled a byte at a time so loop() never waits for a line
+char cmdBuf[32];
+uint8_t cmdLen = 0;
 
 // ============================================================================
 // Setup
@@ -136,10 +151,13 @@ void checkButtons() {
     return;
   }
 
-  // Start button - only active when armed
+  // Start button - only active when armed. It only asks the host to start:
+  // the host arms the cameras and then sends START. Disarming here makes one
+  // press one request, however long the button is held.
   if (currentState == STATE_ARMED && digitalRead(startButtonPin) == LOW) {
+    currentState = STATE_IDLE;
+    digitalWrite(statusLedPin, LOW);
     Serial.println("BUTTON:START");
-    startRecording();
   }
 }
 
@@ -149,6 +167,7 @@ void checkButtons() {
 
 void startRecording() {
   frameCount = 0;
+  latePulses = 0;
   lastTriggerUs = micros();
   currentState = STATE_RECORDING;
   digitalWrite(statusLedPin, HIGH);
@@ -158,8 +177,11 @@ void startRecording() {
 void stopRecording() {
   currentState = STATE_IDLE;
   digitalWrite(statusLedPin, LOW);
+  // STOPPED:<pulses fired>:<late pulses>
   Serial.print("STOPPED:");
-  Serial.println(frameCount);
+  Serial.print(frameCount);
+  Serial.print(":");
+  Serial.println(latePulses);
 }
 
 // ============================================================================
@@ -201,6 +223,11 @@ void processCommand(String cmd) {
       currentState = STATE_IDLE;
       Serial.println("DISARMED");
     }
+  }
+  else if (currentState == STATE_RECORDING &&
+           (cmd == "TRIGGER" || cmd.startsWith("FPS:") || cmd.startsWith("CAMERAS:"))) {
+    // An extra pulse or a rate change mid-recording breaks frame N = trigger N
+    Serial.println("ERROR:Not allowed while recording");
   }
   else if (cmd == "TRIGGER") {
     // Manual single trigger (for testing/preview)
@@ -248,7 +275,7 @@ void processCommand(String cmd) {
     Serial.println("PONG");
   }
   else if (cmd == "VERSION") {
-    Serial.println("VERSION:1.0.0");
+    Serial.println("VERSION:1.1.0");
   }
   else if (cmd == "HELP") {
     Serial.println("COMMANDS:START,STOP,ARM,DISARM,TRIGGER,FPS:n,CAMERAS:n,STATUS,PING,VERSION");
@@ -256,6 +283,21 @@ void processCommand(String cmd) {
   else if (cmd.length() > 0) {
     Serial.print("ERROR:Unknown command: ");
     Serial.println(cmd);
+  }
+}
+
+void pollSerial() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (cmdLen > 0) {
+        cmdBuf[cmdLen] = '\0';
+        cmdLen = 0;
+        processCommand(String(cmdBuf));
+      }
+    } else if (cmdLen < sizeof(cmdBuf) - 1) {
+      cmdBuf[cmdLen++] = c;
+    }
   }
 }
 
@@ -268,23 +310,24 @@ void loop() {
   checkButtons();
 
   // Handle serial commands
-  if (Serial.available()) {
-    String cmd = Serial.readStringUntil('\n');
-    processCommand(cmd);
-  }
+  pollSerial();
 
   // Handle recording state - tight timing loop
   if (currentState == STATE_RECORDING) {
     unsigned long now = micros();
 
     // Simple elapsed check (overflow handled by unsigned arithmetic)
-    if ((now - lastTriggerUs) >= frameIntervalUs) {
+    unsigned long elapsed = now - lastTriggerUs;
+    if (elapsed >= frameIntervalUs) {
       triggerAllCameras();
-      lastTriggerUs += frameIntervalUs;
-
-      // Catch up if we're behind (prevents drift accumulation)
-      while ((micros() - lastTriggerUs) >= frameIntervalUs) {
-        triggerAllCameras();
+      if (elapsed - frameIntervalUs >= frameIntervalUs) {
+        // A whole period late: fire this one pulse and re-anchor. Catch-up
+        // pulses would land a pulse width apart, faster than any camera can
+        // take a frame, so the cameras would ignore them.
+        lastTriggerUs = now;
+        latePulses++;
+      } else {
+        // Advance by the nominal period so timing error never accumulates
         lastTriggerUs += frameIntervalUs;
       }
     }

@@ -4,7 +4,7 @@
 
 import type { CameraSettings, CameraInfo, CameraConfig } from './camera';
 import type { ArduinoStatus } from './arduino';
-import type { RecordingConfig, RecordingStatus } from './recording';
+import type { RecordingConfig, RecordingStatus, StartResult, StopResult } from './recording';
 
 export interface ElectronAPI {
   camera: {
@@ -37,8 +37,8 @@ export interface ElectronAPI {
   };
 
   recording: {
-    start: (sessionName?: string) => Promise<boolean>;
-    stop: () => Promise<{ frameCounts: Record<string, number>; synced: boolean }>;
+    start: (sessionName?: string) => Promise<StartResult>;
+    stop: () => Promise<StopResult>;
     getStatus: () => Promise<RecordingStatus>;
     setConfig: (config: Partial<RecordingConfig>) => Promise<void>;
     getConfig: () => Promise<RecordingConfig>;

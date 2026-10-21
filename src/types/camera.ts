@@ -52,6 +52,26 @@ export interface CaptureResult {
   error?: string;
 }
 
+/**
+ * How a camera's frames line up with the Arduino's pulses (python/sync_check.py):
+ *   exact        every pulse arrived, so frame i is pulse i
+ *   recoverable  frames lost in transit; the frames CSV gives each frame's pulse
+ *   unproven     the camera ignored pulses, so later frames may be shifted
+ *   extra        more frames than pulses
+ *   no_block_ids the camera reported no block IDs
+ */
+export type SyncVerdict = 'exact' | 'recoverable' | 'unproven' | 'extra' | 'no_block_ids';
+
+export interface CameraCaptureResult {
+  frame_count: number;
+  verdict: SyncVerdict;
+  verdict_reason: string;
+  /** Per-frame block ID and timestamps: <camera_id>_frames.csv */
+  frames_csv: string;
+  /** Block-ID summary: frames, last_block_id, missing, gap_ranges, failed_grabs */
+  block_ids: Record<string, unknown>;
+}
+
 export const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
   exposure_time: 8000,
   gain: 0,

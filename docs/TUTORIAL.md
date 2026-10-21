@@ -24,7 +24,7 @@ Multi-Cam-Sync is a hardware-synchronized multi-camera recording system that:
 - Captures frames from 2-4 Basler cameras **simultaneously**
 - Uses Arduino hardware triggers for **sub-millisecond** synchronization
 - Provides an **Electron desktop app** for easy control
-- Supports **120fps** recording with frame verification
+- Supports **120fps** recording with per-frame sync verification
 
 ### Architecture
 
@@ -208,9 +208,9 @@ Open Serial Monitor (115200 baud) and test:
 | `STATUS` | `STATUS:state:frames:fps:cams` | Get status |
 | `ARM` | `ARMED` | Enable start button |
 | `START` | `RECORDING` | Begin triggering |
-| `STOP` | `STOPPED:count` | Stop triggering |
-| `TRIGGER` | `TRIGGERED:n` | Single trigger |
-| `FPS:n` | `FPS_SET:n` | Set frame rate |
+| `STOP` | `STOPPED:pulses:late` | Stop triggering |
+| `TRIGGER` | `TRIGGERED:n` | Single trigger (not while recording) |
+| `FPS:n` | `FPS_SET:n` | Set frame rate (not while recording) |
 
 ---
 
@@ -319,13 +319,13 @@ npm start
    - Status LED on Arduino lights up
 
 6. **Monitor recording**:
-   - Watch frame counts (should be identical)
+   - Watch frame counts (they can differ by a frame or two in flight)
    - Monitor elapsed time
    - Watch for any error messages
 
 7. **Stop recording**: Click "■ Stop Recording"
-   - All cameras stop capturing
-   - Frame counts are verified
+   - The Arduino stops, then every camera saves its last frames
+   - Each camera is checked against the Arduino's pulse count
    - Files are saved to output directory
 
 ### Output Structure
@@ -333,32 +333,35 @@ npm start
 ```
 ~/recordings/
 └── 2026-01-28_14-30-00/
-    ├── metadata.json
+    ├── sync_report.json
     ├── cam1/
-    │   ├── 000001.png
-    │   ├── 000002.png
-    │   └── ...
+    │   ├── cam1.avi
+    │   └── cam1_frames.csv
     └── cam2/
-        ├── 000001.png
-        ├── 000002.png
-        └── ...
+        ├── cam2.avi
+        └── cam2_frames.csv
 ```
 
 ### Verify Sync
 
-After recording, check `metadata.json`:
+After recording, check `sync_report.json`:
 
 ```json
 {
-  "sync_status": "OK",
-  "cameras": [
-    {"id": "cam1", "frames": 7200},
-    {"id": "cam2", "frames": 7200}
-  ]
+  "arduino": {"pulses": 7200, "late_pulses": 0},
+  "synced": false,
+  "cameras": {
+    "cam1": {"frame_count": 7200, "verdict": "exact"},
+    "cam2": {"frame_count": 7199, "verdict": "recoverable",
+             "verdict_reason": "1 of 7200 frames lost in transit; ..."}
+  }
 }
 ```
 
-If `sync_status` is "MISMATCH", some frames may have been dropped.
+`recoverable` means a frame was lost on the way to the PC: match the cameras by the
+`block_id` column of each `<cam>_frames.csv`. `unproven` means the camera ignored
+triggers, and its frames may be shifted. See
+[Sync verification](../README.md#sync-verification).
 
 ---
 

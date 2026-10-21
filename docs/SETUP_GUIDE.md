@@ -334,7 +334,7 @@ npm start
 3. Let it run for 5-10 seconds
 4. Click **Stop**
 5. Check output directory for recorded frames
-6. Verify frame counts match across all cameras
+6. Open the session's `sync_report.json` and check every camera's verdict is `exact`
 
 ---
 
